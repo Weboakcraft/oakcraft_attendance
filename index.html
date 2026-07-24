@@ -323,8 +323,22 @@ async function boot(){
     $('#loginScreen').style.display='flex';
     if(window.google?.accounts?.id) initGSI();
     $('#loginErr').style.display='block';
-    $('#loginErr').textContent = err.message;
+    const msg = err.message||'Login failed';
+    if(/register nahi|access nahi/i.test(msg)){
+      $('#loginErr').innerHTML = esc(msg) +
+        `<div style="margin-top:12px;text-align:left"><input id="reqPhone" placeholder="Phone (optional)" style="margin-bottom:8px">
+        <button class="btn btn-gold" style="width:100%" onclick="doRequestAccess(this)">🙋 Request Access — HR ko bhejo</button></div>`;
+    } else {
+      $('#loginErr').textContent = msg;
+    }
   }
+}
+async function doRequestAccess(btn){
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Bhej rahe hain…';
+  try{
+    await api('requestAccess', { phone: ($('#reqPhone')?.value||'') }, {noRelogin:true});
+    $('#loginErr').innerHTML='✅ Aapki request HR ko bhej di gayi hai. HR aapko add karega, phir dobara <b>Sign in</b> karein.';
+  }catch(e){ btn.disabled=false; btn.innerHTML='Retry'; toast(e.message,'err'); }
 }
 
 /* ================= NAV ================= */
@@ -772,15 +786,23 @@ async function decideLeave(id,decision){
 /* ================= USERS (HR) ================= */
 async function renderUsers(){
   loadingView('Employees…');
-  let d; try{ d=await api('getUsers'); }catch(e){ return errView(e); }
+  let d,reqs=[]; try{ d=await api('getUsers'); reqs=(await api('getAccessRequests')).rows||[]; }catch(e){ return errView(e); }
   S.cache.users=d.users;
+  const reqBanner = reqs.length ? `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--gold)">
+    <h3>🙋 ${reqs.length} access request${reqs.length>1?'s':''} pending</h3>
+    <div class="chart-sub">Naye users jinhone Gmail se login karke access maanga — Add karo to wo login kar payenge</div>
+    <div class="timeline">${reqs.map(r=>`<div class="ti"><span class="tdot" style="background:var(--gold)"></span>
+      <div style="flex:1"><div class="tt">${esc(r.name||r.email)}</div><div class="ty">${esc(r.email)}${r.phone?' · '+esc(r.phone):''}</div></div>
+      <button class="btn btn-good btn-sm" onclick='addFromRequest(${JSON.stringify(r).replace(/'/g,"&#39;")})'>+ Add</button></div>`).join('')}</div></div>` : '';
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Employees</h2><div class="sub">User master — ${d.users.length} employees (${d.users.filter(u=>String(u.status).toLowerCase()==='active').length} active)</div></div>
   <div class="top-actions"><input class="searchbox" placeholder="🔍 Search…" oninput="drawUsers(this.value)">
   <button class="btn btn-gold" onclick="userModal()">+ Add Employee</button></div></div>
+  ${reqBanner}
   <div class="tbl-wrap"><table id="usersTable"></table></div>`;
   drawUsers('');
 }
+function addFromRequest(r){ userModal({ name:r.name||'', email:r.email, status:'Active', role:'Employee', type:'Staff' }); }
 function drawUsers(q){
   q=(q||'').toLowerCase();
   const users=(S.cache.users||[]).filter(u=>!q||u.name.toLowerCase().includes(q)||u.email.includes(q)||String(u.code).includes(q));
