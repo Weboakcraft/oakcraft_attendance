@@ -344,7 +344,7 @@ async function boot(){
   }
 }
 async function doRequestAccess(btn){
-  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Bhej rahe hain…';
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Sending…';
   try{
     await api('requestAccess', { phone: ($('#reqPhone')?.value||'') }, {noRelogin:true});
     $('#loginErr').innerHTML='✅ Your request has been sent to HR. Once HR adds you, please <b>Sign in</b> again.';
@@ -488,7 +488,7 @@ async function renderDashboard(){
     const t=d.team;
     html += `<div class="grid g4" style="margin-bottom:16px">
       ${tile('Present Today', t.present, 'of '+t.total+' employees', 'var(--good)')}
-      ${tile('Absent', t.absent, t.late+' late aaye', 'var(--crit)')}
+      ${tile('Absent', t.absent, t.late+' came late', 'var(--crit)')}
       ${tile('Half Day', t.halfDay, 'on '+fmtD(d.today), 'var(--warn)')}
       ${tile('On Leave / Off', t.onLeave+t.weekOff, (d.pendingLeaves||0)+' leave pending', 'var(--violet)')}
     </div>
@@ -498,7 +498,7 @@ async function renderDashboard(){
           {n:'Present',v:t.present,c:'var(--good)'},{n:'Half Day',v:t.halfDay,c:'var(--warn)'},
           {n:'On Leave',v:t.onLeave,c:'var(--violet)'},{n:'Absent',v:t.absent,c:'var(--crit)'},
           {n:'Week Off / Holiday',v:t.weekOff,c:'var(--muted)'}], t.total, 'Employees')}</div></div>
-      <div class="card chart-card"><h3>Month trend — ${MONTH_NAME(S.month)}</h3><div class="chart-sub">Har din kitne present / half / leave / absent</div>
+      <div class="card chart-card"><h3>Month trend — ${MONTH_NAME(S.month)}</h3><div class="chart-sub">Daily present / half / leave / absent count</div>
         ${teamTrendChart(t.trend)}</div>
     </div>
     <div class="card" style="padding:0"><div style="padding:16px 20px 4px;display:flex;justify-content:space-between;align-items:center">
@@ -509,7 +509,7 @@ async function renderDashboard(){
       ${tile('Present', my.present, MONTH_NAME(S.month), 'var(--good)')}
       ${tile('Half Days', my.halfDay, my.late+' din late', 'var(--warn)')}
       ${tile('Absent', my.absent, (d.myPendingLeaves||0)+' leave pending', 'var(--crit)')}
-      ${tile('Total Hours', hrs, 'is mahine', 'var(--blue)')}
+      ${tile('Total Hours', hrs, 'this month', 'var(--blue)')}
     </div>
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card chart-card"><h3>Today's status</h3><div class="chart-sub">${fmtDW(d.today)}</div>
@@ -520,7 +520,7 @@ async function renderDashboard(){
           <div class="ti"><span class="tdot" style="background:var(--blue)"></span><div><div class="tt">${ts.hoursText||'—'}</div><div class="ty">Working Hours</div></div></div>
         </div>` : '<div class="empty"><div class="ic">🌤️</div>No punch recorded today yet<br><br><button class="btn btn-gold" onclick="go(\'punch\')">Punch In</button></div>'}
       </div>
-      <div class="card chart-card"><h3>Mere daily hours</h3><div class="chart-sub">${MONTH_NAME(S.month)}</div>
+      <div class="card chart-card"><h3>My daily hours</h3><div class="chart-sub">${MONTH_NAME(S.month)}</div>
         ${hoursBarChart(my.trend, 8)}</div>
     </div>`;
   }
@@ -571,7 +571,7 @@ async function renderPunch(){
       <div class="card" style="text-align:center">
         <div class="clock" id="liveClock"></div>
         <div style="color:var(--muted);font-size:13px" id="liveDate"></div>
-        <div class="gps-row"><span class="gps-dot" id="gpsDot"></span><span id="gpsText">Location le rahe hain…</span></div>
+        <div class="gps-row"><span class="gps-dot" id="gpsDot"></span><span id="gpsText">Getting location…</span></div>
         <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
         <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
           ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
@@ -864,7 +864,7 @@ async function renderPayout(){
   <div class="grid g3" style="margin-bottom:16px">
     ${tile('Total Payable', INR(total), d.rows.length+' employees','var(--good)')}
     ${tile('Total Advance', INR(d.rows.reduce((a,r)=>a+r.advance,0)),'will be deducted this month','var(--warn)')}
-    ${tile('Absent Days', d.rows.reduce((a,r)=>a+r.absent,0)+' + '+d.rows.reduce((a,r)=>a+r.halfDays,0)+' half','poore team ke','var(--crit)')}
+    ${tile('Absent Days', d.rows.reduce((a,r)=>a+r.absent,0)+' + '+d.rows.reduce((a,r)=>a+r.halfDays,0)+' half','across the whole team','var(--crit)')}
   </div>
   <div class="tbl-wrap"><table>
     <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
@@ -955,7 +955,7 @@ async function renderSettings(){
       <select data-k="per_day_rate_basis"><option value="total_days" ${s.per_day_rate_basis==='total_days'?'selected':''}>Calendar days (live AppSheet jaisa)</option>
       <option value="working_days" ${s.per_day_rate_basis==='working_days'?'selected':''}>Working days (SOP 12.1)</option></select>
       ${F('allowed_late_count','Free late days / month','deduction after this')}
-      ${F('late_deduction_per_late','Late deduction (₹ per late)','har chargeable late par')}
+      ${F('late_deduction_per_late','Late deduction (₹ per late)','per chargeable late')}
       <label>Email notifications <span style="font-weight:400;color:var(--muted)">— leave apply/approve + final payout par mail</span></label>
       <select data-k="email_notifications"><option value="yes" ${String(s.email_notifications).toLowerCase()!=='no'?'selected':''}>Yes</option><option value="no" ${String(s.email_notifications).toLowerCase()==='no'?'selected':''}>No</option></select>
       <h3 style="margin-top:22px">Geo-fence (optional)</h3>
