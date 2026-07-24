@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f1420">
+<title>OakCraft Attendance</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f1420'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23e8b34b' font-family='Arial' font-weight='bold'>O</text></svg>">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+/* ============ OAKCRAFT ATTENDANCE — PREMIUM UI ============ */
+:root{
+  color-scheme: light;
+  --bg:#f4f5f7; --surface:#ffffff; --surface2:#f9f9f7;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --line:#e1e0d9; --hairline:rgba(11,11,11,.08);
+  --brand:#0f1420; --brand2:#1c2536; --gold:#e8b34b; --gold2:#c9962f;
+  --blue:#2a78d6; --aqua:#1baf7a; --yellow:#eda100; --red:#e34948; --violet:#4a3aa7; --orange:#eb6834;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --goodtext:#006300;
+  --shadow:0 1px 2px rgba(15,20,32,.05),0 8px 24px -12px rgba(15,20,32,.18);
+  --shadow-lg:0 24px 60px -20px rgba(15,20,32,.35);
+  --r:16px; --r-sm:10px;
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --bg:#0d0d0d; --surface:#1a1a19; --surface2:#161615;
+    --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --line:#2c2c2a; --hairline:rgba(255,255,255,.10);
+    --blue:#3987e5; --aqua:#199e70; --yellow:#c98500; --red:#e66767; --violet:#9085e9; --orange:#d95926;
+    --goodtext:#0ca30c;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.45}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;width:100%;outline:none;transition:border-color .15s, box-shadow .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,120,214,.15)}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--ink2);margin:12px 0 5px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px}
+h1,h2,h3{letter-spacing:-.02em}
+
+/* ---------- LOGIN ---------- */
+#loginScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(1200px 700px at 70% -10%,#24314d 0%,#0f1420 55%,#0a0e17 100%);z-index:100;padding:20px}
+.login-card{width:100%;max-width:400px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(18px);border-radius:24px;padding:44px 36px;text-align:center;box-shadow:var(--shadow-lg);animation:rise .5s ease}
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.logo-mark{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:30px;font-weight:800;color:#0f1420;box-shadow:0 12px 30px -8px rgba(232,179,75,.5)}
+.login-card h1{color:#fff;font-size:23px;margin-bottom:6px}
+.login-card p{color:rgba(255,255,255,.55);font-size:13.5px;margin-bottom:28px}
+#gbtn{display:flex;justify-content:center;min-height:44px}
+.login-foot{margin-top:26px;color:rgba(255,255,255,.35);font-size:11.5px}
+.login-err{margin-top:16px;color:#ffb4b4;font-size:13px;background:rgba(227,73,72,.12);border:1px solid rgba(227,73,72,.3);border-radius:10px;padding:10px;display:none}
+
+/* ---------- APP SHELL ---------- */
+#app{display:none;min-height:100vh}
+.shell{display:flex;min-height:100vh}
+.sidebar{width:236px;background:linear-gradient(180deg,var(--brand) 0%,#0b0f19 100%);color:#fff;position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column;padding:22px 14px calc(16px + var(--sab));z-index:40}
+.side-brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px}
+.side-brand .logo-mark{width:38px;height:38px;border-radius:11px;margin:0;font-size:19px}
+.side-brand b{font-size:15.5px;letter-spacing:.01em}
+.side-brand span{display:block;font-size:10.5px;color:rgba(255,255,255,.45);font-weight:500;letter-spacing:.08em;text-transform:uppercase}
+.nav{flex:1;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+.nav button{display:flex;align-items:center;gap:11px;padding:10.5px 12px;border-radius:11px;color:rgba(255,255,255,.62);font-size:13.5px;font-weight:600;text-align:left;transition:all .15s;width:100%}
+.nav button svg{width:19px;height:19px;flex:none}
+.nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav button.active{background:linear-gradient(90deg,rgba(232,179,75,.18),rgba(232,179,75,.06));color:var(--gold)}
+.nav .sep{height:1px;background:rgba(255,255,255,.08);margin:10px 8px}
+.side-user{display:flex;align-items:center;gap:10px;padding:12px 10px;border-top:1px solid rgba(255,255,255,.08);margin-top:8px}
+.avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--violet));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex:none}
+.side-user .nm{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-user .rl{font-size:11px;color:rgba(255,255,255,.45)}
+.side-user button{color:rgba(255,255,255,.5);padding:6px}
+.side-user button:hover{color:var(--red)}
+
+.main{flex:1;min-width:0;margin-left:236px;padding:26px 30px calc(30px + var(--sab));max-width:1280px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.topbar h2{font-size:22px}
+.topbar .sub{color:var(--muted);font-size:13px;margin-top:2px}
+.top-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* ---------- COMPONENTS ---------- */
+.card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r);box-shadow:var(--shadow);padding:20px}
+.grid{display:grid;gap:16px}
+.grid>*{min-width:0}
+.g4{grid-template-columns:repeat(4,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+.tile{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r);box-shadow:var(--shadow);padding:18px 20px;position:relative;overflow:hidden}
+.tile .k{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:7px}
+.tile .k .dot{width:9px;height:9px;border-radius:3px;flex:none}
+.tile .v{font-size:30px;font-weight:750;margin-top:8px;letter-spacing:-.03em}
+.tile .s{font-size:12px;color:var(--muted);margin-top:3px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:11px;font-weight:650;font-size:13.5px;transition:all .15s;border:1px solid transparent}
+.btn-p{background:var(--brand);color:#fff}
+.btn-p:hover{background:var(--brand2);transform:translateY(-1px)}
+.btn-gold{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#151a26}
+.btn-gold:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.btn-o{border-color:var(--line);color:var(--ink2);background:var(--surface)}
+.btn-o:hover{border-color:var(--muted);color:var(--ink)}
+.btn-danger{background:var(--crit);color:#fff}
+.btn-good{background:var(--good);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
+.btn-sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3.5px 10px;border-radius:99px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.c-present{background:rgba(12,163,12,.12);color:var(--goodtext)}
+.c-working{background:rgba(42,120,214,.12);color:var(--blue)}
+.c-half{background:rgba(250,178,25,.15);color:#9a6b00}
+.c-absent{background:rgba(208,59,59,.11);color:var(--crit)}
+.c-leave{background:rgba(74,58,167,.11);color:var(--violet)}
+.c-off{background:rgba(137,135,129,.14);color:var(--ink2)}
+.c-late{background:rgba(236,131,90,.14);color:#b4522b}
+.c-pending{background:rgba(250,178,25,.15);color:#9a6b00}
+.c-approved{background:rgba(12,163,12,.12);color:var(--goodtext)}
+.c-rejected{background:rgba(208,59,59,.11);color:var(--crit)}
+@media (prefers-color-scheme: dark){
+  .c-half,.c-pending{color:#fab219}.c-late{color:#ec835a}
+}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--hairline);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+th{background:var(--surface2);color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+td{padding:11px 14px;border-bottom:1px solid var(--hairline);vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:var(--surface2)}
+td .who{display:flex;align-items:center;gap:9px}
+td .who .avatar{width:30px;height:30px;font-size:12px}
+td .who .em{font-size:11.5px;color:var(--muted)}
+.num{font-variant-numeric:tabular-nums}
+.empty{text-align:center;padding:44px 20px;color:var(--muted)}
+.empty .ic{font-size:34px;margin-bottom:8px}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+.seg button{padding:7px 14px;border-radius:8px;font-size:12.5px;font-weight:650;color:var(--muted)}
+.seg button.on{background:var(--brand);color:#fff}
+.month-in{width:auto}
+.searchbox{max-width:230px}
+
+/* ---------- PUNCH VIEW ---------- */
+.punch-wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px;align-items:start}
+.cam-card{position:relative;overflow:hidden;padding:0;background:#0b0f19}
+.cam-stage{position:relative;aspect-ratio:4/3.4;display:flex;align-items:center;justify-content:center;background:#0b0f19}
+#camVideo,#camCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#camCanvas{display:none}
+.cam-off{color:rgba(255,255,255,.5);text-align:center;font-size:13.5px;padding:20px}
+.cam-off .ic{font-size:40px;display:block;margin-bottom:10px}
+.cam-bar{display:flex;gap:10px;padding:14px;background:rgba(10,14,23,.92);align-items:center;justify-content:center;flex-wrap:wrap}
+.gps-row{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink2);background:var(--surface2);border:1px solid var(--hairline);border-radius:11px;padding:10px 13px;margin-top:12px}
+.gps-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.gps-dot.ok{background:var(--good);box-shadow:0 0 0 4px rgba(12,163,12,.15);animation:pulse 1.8s infinite}
+.gps-dot.err{background:var(--crit)}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(12,163,12,.18)}50%{box-shadow:0 0 0 7px rgba(12,163,12,.05)}}
+.clock{font-size:42px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.clock small{font-size:16px;color:var(--muted);font-weight:600}
+.punch-big{width:100%;padding:17px;border-radius:15px;font-size:16.5px;font-weight:750;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:10px}
+.timeline{margin-top:16px}
+.timeline .ti{display:flex;gap:12px;padding:9px 0;align-items:center;border-bottom:1px dashed var(--line)}
+.timeline .ti:last-child{border:none}
+.ti .tdot{width:11px;height:11px;border-radius:50%;flex:none}
+.ti .tt{font-weight:700;font-variant-numeric:tabular-nums}
+.ti .ty{font-size:12px;color:var(--muted)}
+.ti img{width:34px;height:34px;border-radius:8px;object-fit:cover;margin-left:auto;border:1px solid var(--line)}
+
+/* ---------- CHARTS ---------- */
+.chart-card h3, .card h3{font-size:14.5px;margin-bottom:2px}
+.chart-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);font-weight:600}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.bar-tip{position:fixed;pointer-events:none;background:var(--brand);color:#fff;font-size:12px;padding:7px 10px;border-radius:8px;box-shadow:var(--shadow-lg);z-index:90;display:none;white-space:pre-line;line-height:1.5}
+.donut-wrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.donut-center b{font-size:26px}
+.donut-center span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+
+/* ---------- MODAL / TOAST ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(10,14,23,.55);backdrop-filter:blur(4px);z-index:80;display:none;align-items:center;justify-content:center;padding:18px}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border-radius:20px;box-shadow:var(--shadow-lg);width:100%;max-width:480px;max-height:88vh;overflow-y:auto;padding:26px;animation:rise .25s ease}
+.modal h3{font-size:17px;margin-bottom:4px}
+.modal .msub{color:var(--muted);font-size:13px;margin-bottom:10px}
+.modal-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:22px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + var(--sab));background:var(--brand);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow-lg);z-index:95;display:none;max-width:90vw;text-align:center}
+.toast.err{background:var(--crit)}
+.toast.ok{background:var(--good)}
+.spin{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;display:inline-block}
+.spin.dark{border-color:rgba(0,0,0,.15);border-top-color:var(--ink)}
+@keyframes sp{to{transform:rotate(360deg)}}
+.loading-view{display:flex;flex-direction:column;align-items:center;gap:14px;padding:70px 20px;color:var(--muted)}
+.skel{background:linear-gradient(90deg,var(--surface2),var(--line),var(--surface2));background-size:200% 100%;animation:sk 1.2s infinite;border-radius:8px}
+@keyframes sk{to{background-position:-200% 0}}
+
+/* payslip print */
+#payslipArea{display:none}
+@media print{
+  body *{visibility:hidden} #payslipArea,#payslipArea *{visibility:visible}
+  #payslipArea{display:block;position:absolute;inset:0;padding:30px}
+}
+
+/* ---------- MOBILE ---------- */
+.bottom-nav{display:none}
+@media (max-width: 960px){
+  .sidebar{display:none}
+  .main{margin-left:0;padding:16px 14px calc(88px + var(--sab))}
+  .g4{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(2,1fr)}
+  .punch-wrap{grid-template-columns:1fr}
+  .topbar h2{font-size:19px}
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--brand);padding:8px 6px calc(8px + var(--sab));z-index:40;justify-content:space-around;border-top:1px solid rgba(255,255,255,.08)}
+  .bottom-nav button{display:flex;flex-direction:column;align-items:center;gap:3px;color:rgba(255,255,255,.55);font-size:10px;font-weight:650;padding:5px 9px;border-radius:10px;flex:1;max-width:88px}
+  .bottom-nav button svg{width:21px;height:21px}
+  .bottom-nav button.active{color:var(--gold)}
+}
+@media (max-width: 520px){ .g4,.g3,.g2{grid-template-columns:1fr 1fr} .tile .v{font-size:24px} }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="logo-mark">O</div>
+    <h1>OakCraft Attendance</h1>
+    <p>Punch in, reports, leave &amp; payroll — ek hi jagah.<br>Sign in with your company Google account.</p>
+    <div id="gbtn"></div>
+    <div class="login-err" id="loginErr"></div>
+    <div class="login-foot">OakCraft · HR &amp; Payroll Automation · Internal Use Only</div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app">
+<div class="shell">
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="logo-mark">O</div>
+      <div><b>OakCraft</b><span>Attendance</span></div>
+    </div>
+    <nav class="nav" id="sideNav"></nav>
+    <div class="side-user">
+      <div class="avatar" id="sbAvatar"></div>
+      <div style="flex:1;min-width:0">
+        <div class="nm" id="sbName"></div>
+        <div class="rl" id="sbRole"></div>
+      </div>
+      <button onclick="logout()" title="Logout">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      </button>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<nav class="bottom-nav" id="bottomNav"></nav>
+</div>
+
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBox"></div></div>
+<div class="toast" id="toast"></div>
+<div class="bar-tip" id="barTip"></div>
+<div id="payslipArea"></div>
+
+<script>
+/* ╔══════════════════════════════════════════════════════╗
+   ║  CONFIG — YE 2 VALUES ZAROOR BHARO (guide dekho)      ║
+   ╚══════════════════════════════════════════════════════╝ */
+const CONFIG = {
+  API_URL: 'https://script.google.com/macros/s/AKfycby13SZVtQyAAykvsFnoKSgvSg3ozQeIGRBQpAJny7D_DhPLKgDU0L57jzHSY5VmfigM/exec',
+  GOOGLE_CLIENT_ID: 'PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE.apps.googleusercontent.com'
+};
+
+/* ================= STATE ================= */
+let S = { token:null, profile:null, today:null, leaveTypes:[], view:'dashboard', month:new Date().toISOString().slice(0,7), cache:{} };
+const $ = s => document.querySelector(s);
+const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const INITIALS = n => String(n||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+const MONTH_NAME = m => new Date(m+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+const fmtT = t => { if(!t) return '—'; const [h,mi]=t.split(':').map(Number); const ap=h>=12?'PM':'AM'; return `${((h+11)%12)+1}:${String(mi).padStart(2,'0')} ${ap}`; };
+const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+const fmtDW = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+const INR = n => '₹' + Number(n||0).toLocaleString('en-IN');
+
+/* ================= API ================= */
+async function api(action, payload={}, opts={}){
+  const res = await fetch(CONFIG.API_URL, {
+    method:'POST', redirect:'follow',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({ action, idToken:S.token, payload })
+  });
+  const j = await res.json();
+  if(!j.ok){
+    if(String(j.error).startsWith('AUTH:') && !opts.noRelogin){ sessionStorage.removeItem('oc_tok'); }
+    throw new Error(j.error||'Request failed');
+  }
+  return j.data;
+}
+
+/* ================= AUTH ================= */
+window.addEventListener('load', () => {
+  if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
+    $('#loginErr').style.display='block';
+    $('#loginErr').textContent='⚙️ Setup incomplete: index.html ke CONFIG mein API_URL aur GOOGLE_CLIENT_ID bharo (Setup Guide Step 3–5).';
+  }
+  const t = setInterval(()=>{ if(window.google?.accounts?.id){ clearInterval(t); initGSI(); } }, 120);
+  const saved = sessionStorage.getItem('oc_tok');
+  if(saved){ S.token = saved; boot().catch(()=>{ sessionStorage.removeItem('oc_tok'); }); }
+});
+function initGSI(){
+  google.accounts.id.initialize({ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true });
+  google.accounts.id.renderButton($('#gbtn'), { theme:'filled_black', size:'large', shape:'pill', width:300, text:'signin_with' });
+}
+function onCred(resp){ S.token = resp.credential; sessionStorage.setItem('oc_tok', S.token); boot(); }
+function logout(){ sessionStorage.removeItem('oc_tok'); try{google.accounts.id.disableAutoSelect();}catch(e){} location.reload(); }
+
+async function boot(){
+  $('#loginErr').style.display='none';
+  $('#gbtn').innerHTML='<div class="spin"></div>';
+  try{
+    const d = await api('init', {}, {noRelogin:true});
+    S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes; S.geofence=d.geofence||null;
+    $('#loginScreen').style.display='none';
+    $('#app').style.display='block';
+    buildNav(); go('dashboard');
+  }catch(err){
+    $('#loginScreen').style.display='flex';
+    if(window.google?.accounts?.id) initGSI();
+    $('#loginErr').style.display='block';
+    $('#loginErr').textContent = err.message;
+  }
+}
+
+/* ================= NAV ================= */
+const IC = {
+  dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  punch:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  rep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>',
+  leave:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
+  pay:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M7 15h2"/></svg>',
+  set:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>'
+};
+function navItems(){
+  const isHR = ['HR','Admin'].includes(S.profile.role);
+  const items = [
+    {id:'dashboard', t:'Dashboard', ic:IC.dash},
+    {id:'punch', t:'Attendance', ic:IC.punch},
+    {id:'reports', t:'Reports', ic:IC.rep},
+    {id:'leave', t:'Leave', ic:IC.leave}
+  ];
+  if(isHR) items.push({id:'users',t:'Employees',ic:IC.users},{id:'payout',t:'Payout',ic:IC.pay});
+  if(S.profile.role==='Admin') items.push({id:'settings',t:'Settings',ic:IC.set});
+  return items;
+}
+function buildNav(){
+  const items = navItems();
+  $('#sideNav').innerHTML = items.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}${i.t}</button>`).join('');
+  const mob = items.slice(0,5);
+  $('#bottomNav').innerHTML = mob.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}<span>${i.t}</span></button>`).join('');
+  $('#sbName').textContent = S.profile.name;
+  $('#sbRole').textContent = S.profile.role + ' · ' + S.profile.code;
+  $('#sbAvatar').textContent = INITIALS(S.profile.name);
+}
+function go(v){
+  S.view=v;
+  document.querySelectorAll('[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
+  stopCam();
+  ({dashboard:renderDashboard,punch:renderPunch,reports:renderReports,leave:renderLeave,users:renderUsers,payout:renderPayout,settings:renderSettings})[v]();
+}
+function loadingView(msg){ $('#main').innerHTML = `<div class="loading-view"><div class="spin dark" style="width:26px;height:26px"></div>${msg||'Loading…'}</div>`; }
+function toast(msg, type=''){ const t=$('#toast'); t.className='toast '+type; t.textContent=msg; t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none', 3500); }
+function modal(html){ $('#modalBox').innerHTML=html; $('#modalBg').classList.add('open'); }
+function closeModal(){ $('#modalBg').classList.remove('open'); }
+$('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeModal(); });
+
+const STATUS_CHIP = {
+  'Present':'c-present','Working':'c-working','Half Day':'c-half','Absent':'c-absent',
+  'Paid Leave':'c-leave','Week Off':'c-off','Holiday':'c-off','Festival Holiday':'c-off'
+};
+const chip = st => `<span class="chip ${STATUS_CHIP[st]||'c-off'}">${esc(st)}</span>`;
+const monthPicker = (oninput) => `<input type="month" class="month-in" value="${S.month}" max="${new Date().toISOString().slice(0,7)}" onchange="S.month=this.value;${oninput}">`;
+
+/* ================= CHARTS (inline SVG) ================= */
+const CHART_COLORS = { Present:'var(--good)', Working:'var(--blue)', 'Half Day':'var(--warn)', Absent:'var(--crit)', 'Paid Leave':'var(--violet)', Off:'var(--muted)' };
+function tipShow(e, text){ const t=$('#barTip'); t.textContent=text; t.style.display='block'; t.style.left=Math.min(e.clientX+12, innerWidth-170)+'px'; t.style.top=(e.clientY-14)+'px'; }
+function tipHide(){ $('#barTip').style.display='none'; }
+
+function hoursBarChart(trend, fullDay){
+  // employee ke daily hours — bars, full-day threshold line
+  const data = trend.filter(t=>['Present','Working','Half Day','Absent'].includes(t.status)||t.hours>0);
+  if(!data.length) return '<div class="empty">Abhi data nahi hai</div>';
+  const W=Math.max(320, data.length*26), H=150, pad=6, maxH=Math.max(10, fullDay+2, ...data.map(d=>d.hours));
+  const bw=Math.min(16, (W-2*pad)/data.length-6);
+  let bars='';
+  data.forEach((d,i)=>{
+    const x=pad+i*((W-2*pad)/data.length)+3;
+    const h=Math.max(2,(d.hours/maxH)*(H-30));
+    const col=d.status==='Absent'?'var(--crit)':(d.hours>=fullDay?'var(--good)':'var(--warn)');
+    bars+=`<rect x="${x}" y="${H-20-h}" width="${bw}" height="${h}" rx="4" fill="${col}"
+      onmousemove="tipShow(event,'${fmtDW(d.date)}\\n${d.hours||0} hrs · ${d.status}${d.late?' · Late':''}')" onmouseleave="tipHide()"/>`;
+    if(i%5===0) bars+=`<text x="${x+bw/2}" y="${H-5}" font-size="9.5" text-anchor="middle" fill="var(--muted)">${d.date.slice(8)}</text>`;
+  });
+  const thY=H-20-(fullDay/maxH)*(H-30);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="none" role="img" aria-label="Daily working hours">
+    <line x1="${pad}" y1="${H-20}" x2="${W-pad}" y2="${H-20}" stroke="var(--line)" stroke-width="1"/>
+    <line x1="${pad}" y1="${thY}" x2="${W-pad}" y2="${thY}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4"/>
+    <text x="${W-pad}" y="${thY-4}" font-size="9.5" text-anchor="end" fill="var(--muted)">${fullDay}h full day</text>
+    ${bars}</svg>
+    <div class="legend"><span><i style="background:var(--good)"></i>Full day</span><span><i style="background:var(--warn)"></i>Short hours</span><span><i style="background:var(--crit)"></i>Absent</span></div>`;
+}
+
+function teamTrendChart(trend){
+  if(!trend||!trend.length) return '<div class="empty">Abhi data nahi hai</div>';
+  const W=Math.max(340, trend.length*30), H=170, pad=8;
+  const maxV=Math.max(1,...trend.map(d=>d.present+d.absent+d.halfDay+d.leave));
+  const bw=Math.min(18,(W-2*pad)/trend.length-8);
+  const series=[['present','var(--good)','Present'],['halfDay','var(--warn)','Half Day'],['leave','var(--violet)','Leave'],['absent','var(--crit)','Absent']];
+  let bars='';
+  trend.forEach((d,i)=>{
+    const x=pad+i*((W-2*pad)/trend.length)+4;
+    let y=H-22;
+    const tip=`${fmtDW(d.date)}\\nPresent ${d.present} · Half ${d.halfDay}\\nLeave ${d.leave} · Absent ${d.absent}`;
+    series.forEach(([k,col])=>{
+      const h=(d[k]/maxV)*(H-38); if(h<=0)return;
+      y-=h;
+      bars+=`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(1.5,h-2)}" rx="3" fill="${col}" onmousemove="tipShow(event,'${tip}')" onmouseleave="tipHide()"/>`;
+    });
+    if(i%4===0) bars+=`<text x="${x+bw/2}" y="${H-6}" font-size="9.5" text-anchor="middle" fill="var(--muted)">${d.date.slice(8)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Team attendance trend">
+    <line x1="${pad}" y1="${H-22}" x2="${W-pad}" y2="${H-22}" stroke="var(--line)"/>${bars}</svg>
+    <div class="legend">${series.map(([k,c,n])=>`<span><i style="background:${c}"></i>${n}</span>`).join('')}</div>`;
+}
+
+function donutChart(parts, centerNum, centerLabel){
+  const total = parts.reduce((a,p)=>a+p.v,0)||1;
+  let acc=0, segs='';
+  const R=54, C=2*Math.PI*R;
+  parts.filter(p=>p.v>0).forEach(p=>{
+    const frac=p.v/total, off=C*(1-acc), len=C*frac;
+    segs+=`<circle r="${R}" cx="70" cy="70" fill="none" stroke="${p.c}" stroke-width="16"
+      stroke-dasharray="${Math.max(0,len-2)} ${C-len+2}" stroke-dashoffset="${off}" stroke-linecap="butt"
+      onmousemove="tipShow(event,'${p.n}: ${p.v}')" onmouseleave="tipHide()"/>`;
+    acc+=frac;
+  });
+  return `<div style="position:relative;width:140px;height:140px;flex:none">
+    <svg viewBox="0 0 140 140" style="width:140px;height:140px;transform:rotate(-90deg)">
+      <circle r="${R}" cx="70" cy="70" fill="none" stroke="var(--line)" stroke-width="16"/>${segs}</svg>
+    <div class="donut-center"><b>${centerNum}</b><span>${centerLabel}</span></div></div>
+    <div class="legend" style="flex-direction:column;gap:8px">${parts.map(p=>`<span><i style="background:${p.c}"></i>${p.n} — <b>${p.v}</b></span>`).join('')}</div>`;
+}
+
+/* ================= DASHBOARD ================= */
+async function renderDashboard(){
+  loadingView('Dashboard load ho raha hai…');
+  let d; try{ d = await api('getDashboard',{month:S.month}); }catch(e){ return errView(e); }
+  const isHR = d.isHR, my=d.my, ts=my.todayStatus;
+  const hrs = my.totalHours;
+  const greeting = new Date().getHours()<12?'Good morning':new Date().getHours()<17?'Good afternoon':'Good evening';
+
+  let html = `<div class="topbar"><div><h2>${greeting}, ${esc(S.profile.name.split(' ')[0])} 👋</h2>
+    <div class="sub">${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div></div>
+    <div class="top-actions">${monthPicker('renderDashboard()')}
+    <button class="btn btn-gold" onclick="go('punch')">⏱ Punch</button></div></div>`;
+
+  if(isHR && d.team){
+    const t=d.team;
+    html += `<div class="grid g4" style="margin-bottom:16px">
+      ${tile('Present Today', t.present, 'of '+t.total+' employees', 'var(--good)')}
+      ${tile('Absent', t.absent, t.late+' late aaye', 'var(--crit)')}
+      ${tile('Half Day', t.halfDay, 'on '+fmtD(d.today), 'var(--warn)')}
+      ${tile('On Leave / Off', t.onLeave+t.weekOff, (d.pendingLeaves||0)+' leave pending', 'var(--violet)')}
+    </div>
+    <div class="grid g2" style="margin-bottom:16px;align-items:stretch">
+      <div class="card chart-card"><h3>Today at a glance</h3><div class="chart-sub">${fmtDW(d.today)}</div>
+        <div class="donut-wrap">${donutChart([
+          {n:'Present',v:t.present,c:'var(--good)'},{n:'Half Day',v:t.halfDay,c:'var(--warn)'},
+          {n:'On Leave',v:t.onLeave,c:'var(--violet)'},{n:'Absent',v:t.absent,c:'var(--crit)'},
+          {n:'Week Off / Holiday',v:t.weekOff,c:'var(--muted)'}], t.total, 'Employees')}</div></div>
+      <div class="card chart-card"><h3>Month trend — ${MONTH_NAME(S.month)}</h3><div class="chart-sub">Har din kitne present / half / leave / absent</div>
+        ${teamTrendChart(t.trend)}</div>
+    </div>
+    <div class="card" style="padding:0"><div style="padding:16px 20px 4px;display:flex;justify-content:space-between;align-items:center">
+      <h3>Aaj ki team attendance</h3><button class="btn btn-o btn-sm" onclick="go('reports')">Full reports →</button></div>
+      ${teamTodayTable(t.rows)}</div>`;
+  } else {
+    html += `<div class="grid g4" style="margin-bottom:16px">
+      ${tile('Present', my.present, MONTH_NAME(S.month), 'var(--good)')}
+      ${tile('Half Days', my.halfDay, my.late+' din late', 'var(--warn)')}
+      ${tile('Absent', my.absent, (d.myPendingLeaves||0)+' leave pending', 'var(--crit)')}
+      ${tile('Total Hours', hrs, 'is mahine', 'var(--blue)')}
+    </div>
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card chart-card"><h3>Aaj ka status</h3><div class="chart-sub">${fmtDW(d.today)}</div>
+        ${ts ? `<div style="display:flex;align-items:center;gap:14px;margin:8px 0">${chip(ts.status)}${ts.late?'<span class="chip c-late">Late</span>':''}</div>
+        <div class="timeline">
+          <div class="ti"><span class="tdot" style="background:var(--good)"></span><div><div class="tt">${ts.punchIn?fmtT(ts.punchIn):'—'}</div><div class="ty">Punch In</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--crit)"></span><div><div class="tt">${ts.punchOut?fmtT(ts.punchOut):'—'}</div><div class="ty">Punch Out</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--blue)"></span><div><div class="tt">${ts.hoursText||'—'}</div><div class="ty">Working Hours</div></div></div>
+        </div>` : '<div class="empty"><div class="ic">🌤️</div>Aaj abhi tak punch nahi hua<br><br><button class="btn btn-gold" onclick="go(\'punch\')">Punch In karo</button></div>'}
+      </div>
+      <div class="card chart-card"><h3>Mere daily hours</h3><div class="chart-sub">${MONTH_NAME(S.month)}</div>
+        ${hoursBarChart(my.trend, 8)}</div>
+    </div>`;
+  }
+  $('#main').innerHTML = html;
+}
+function tile(k,v,s,color){ return `<div class="tile"><div class="k"><span class="dot" style="background:${color}"></span>${k}</div><div class="v num">${v}</div><div class="s">${esc(s)}</div></div>`; }
+function teamTodayTable(rows){
+  const work=rows.filter(r=>!['Week Off','Holiday','Festival Holiday'].includes(r.status));
+  if(!work.length) return '<div class="empty">Aaj koi record nahi</div>';
+  return `<div style="overflow-x:auto"><table>
+    <thead><tr><th>Employee</th><th>Shift</th><th>In</th><th>Out</th><th>Hours</th><th>Status</th></tr></thead>
+    <tbody>${work.map(r=>`<tr>
+      <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)}</div></div></div></td>
+      <td class="num">${fmtT(r.timing)}</td><td class="num">${r.punchIn?fmtT(r.punchIn):'—'}</td>
+      <td class="num">${r.punchOut?fmtT(r.punchOut):'—'}</td><td class="num">${r.hoursText||'—'}</td>
+      <td>${chip(r.status)}${r.late?' <span class="chip c-late">Late</span>':''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function errView(e){ $('#main').innerHTML=`<div class="card empty"><div class="ic">⚠️</div>${esc(e.message)}<br><br><button class="btn btn-o" onclick="go(S.view)">Retry</button></div>`; }
+
+/* ================= PUNCH ================= */
+let cam={stream:null, photo:null, pos:null};
+function needPhoto(){ return String(S.profile.type||'Staff').toLowerCase()==='staff'; } // Staff → selfie mandatory; Labour/Worker → sirf location
+function haversineM(la1,lo1,la2,lo2){ const R=6371000,r=Math.PI/180,dLa=(la2-la1)*r,dLo=(lo2-lo1)*r;
+  const a=Math.sin(dLa/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2; return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
+function stopCam(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+async function renderPunch(){
+  const t=S.today||{};
+  const nextType = !t.punchedIn ? 'Punch In' : 'Punch Out';
+  const staff = needPhoto();
+  const camCard = staff ? `
+    <div class="card cam-card">
+      <div class="cam-stage">
+        <div class="cam-off" id="camOff"><span class="ic">📷</span>Camera start karne ke liye neeche button dabao</div>
+        <video id="camVideo" autoplay playsinline muted style="display:none"></video>
+        <canvas id="camCanvas"></canvas>
+      </div>
+      <div class="cam-bar">
+        <button class="btn btn-gold" id="camStartBtn" onclick="startCam()">📷 Camera On</button>
+        <button class="btn btn-p" id="camSnapBtn" onclick="snap()" style="display:none">📸 Selfie lo</button>
+        <button class="btn btn-o" id="camRetakeBtn" onclick="retake()" style="display:none">↺ Retake</button>
+      </div>
+    </div>` : '';
+  $('#main').innerHTML = `
+  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Selfie + live location ke saath punch (Staff rule)':'Ek button — live location auto-capture (Labour rule)'}</div></div></div>
+  <div class="punch-wrap" ${staff?'':'style="grid-template-columns:1fr;max-width:520px"'}>
+    ${camCard}
+    <div>
+      <div class="card" style="text-align:center">
+        <div class="clock" id="liveClock"></div>
+        <div style="color:var(--muted);font-size:13px" id="liveDate"></div>
+        <div class="gps-row"><span class="gps-dot" id="gpsDot"></span><span id="gpsText">Location le rahe hain…</span></div>
+        <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
+        <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
+          ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Pehle selfie lo aur GPS lock hone do':'GPS lock hone do…'}</div>
+      </div>
+      <div class="card" style="margin-top:16px"><h3>Aaj ke punches</h3>
+        <div class="timeline" id="todayPunches">${renderPunchList(t.punches||[])}</div></div>
+    </div>
+  </div>`;
+  tickClock(); if(window._clk) clearInterval(window._clk); window._clk=setInterval(tickClock,1000);
+  getGPS();
+}
+function renderPunchList(punches){
+  if(!punches.length) return '<div class="empty" style="padding:20px">Aaj abhi koi punch nahi</div>';
+  return punches.map(p=>`<div class="ti"><span class="tdot" style="background:${p.type==='Punch In'?'var(--good)':'var(--crit)'}"></span>
+    <div><div class="tt">${fmtT(p.time)}</div><div class="ty">${esc(p.type)}</div></div>
+    ${p.photo?`<img src="${esc(p.photo)}" alt="" loading="lazy">`:''}</div>`).join('');
+}
+function tickClock(){ const n=new Date(); const el=$('#liveClock'); if(!el){clearInterval(window._clk);return;}
+  el.innerHTML=n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+`<small> ${n.toLocaleTimeString('en-IN',{second:'2-digit'}).padStart(2,'0')}s</small>`;
+  $('#liveDate').textContent=n.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}); }
+async function startCam(){
+  try{
+    cam.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
+    $('#camVideo').srcObject=cam.stream; $('#camVideo').style.display='block';
+    $('#camOff').style.display='none'; $('#camStartBtn').style.display='none'; $('#camSnapBtn').style.display='inline-flex';
+  }catch(e){ toast('Camera access nahi mila — browser permission allow karo','err'); }
+}
+function snap(){
+  const v=$('#camVideo'), c=$('#camCanvas');
+  const w=Math.min(640, v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
+  c.width=w; c.height=h;
+  c.getContext('2d').drawImage(v,0,0,w,h);
+  cam.photo = c.toDataURL('image/jpeg', 0.72);
+  c.style.display='block'; v.style.display='none'; stopCam();
+  $('#camSnapBtn').style.display='none'; $('#camRetakeBtn').style.display='inline-flex';
+  checkReady();
+}
+function retake(){ cam.photo=null; $('#camCanvas').style.display='none'; $('#camRetakeBtn').style.display='none'; $('#camStartBtn').style.display='none'; startCam(); $('#camSnapBtn').style.display='inline-flex'; checkReady(); }
+function getGPS(){
+  if(!navigator.geolocation){ $('#gpsText').textContent='GPS supported nahi hai is browser mein'; $('#gpsDot').className='gps-dot err'; return; }
+  navigator.geolocation.getCurrentPosition(p=>{
+    cam.pos={lat:p.coords.latitude, lng:p.coords.longitude, accuracy:Math.round(p.coords.accuracy)};
+    const d=$('#gpsDot'), tx=$('#gpsText'); if(!d)return;
+    d.className='gps-dot ok';
+    tx.innerHTML=`Location locked <b>±${cam.pos.accuracy}m</b> · <a href="https://maps.google.com/?q=${cam.pos.lat},${cam.pos.lng}" target="_blank" style="color:var(--blue)">map</a>`;
+    // office geo-fence indicator (live distance)
+    const g=S.geofence;
+    if(g && g.radius>0 && g.lat && g.lng){
+      const dist=Math.round(haversineM(cam.pos.lat,cam.pos.lng,Number(g.lat),Number(g.lng)));
+      const inside=dist<=Number(g.radius);
+      cam.inside=inside;
+      const row=$('#geoRow'); if(row){ row.style.display='flex';
+        $('#geoDot').className='gps-dot '+(inside?'ok':'err');
+        $('#geoText').innerHTML= inside
+          ? `🏢 Office zone ke <b>andar</b> ho (${dist}m / ${g.radius}m allowed) ✅`
+          : `⛔ Office se <b>${dist>=1000?(dist/1000).toFixed(1)+' km':dist+'m'}</b> door ho — punch sirf ${g.radius}m ke andar hoga`; }
+    } else cam.inside=true;
+    checkReady();
+  }, err=>{ const d=$('#gpsDot'); if(!d)return; d.className='gps-dot err'; $('#gpsText').textContent='Location nahi mili — GPS/permission on karke page refresh karo'; },
+  {enableHighAccuracy:true, timeout:15000, maximumAge:30000});
+}
+function checkReady(){
+  const photoOk = !needPhoto() || !!cam.photo;
+  const zoneOk = cam.inside !== false;
+  const ok = photoOk && cam.pos && zoneOk;
+  const b=$('#punchBtn'); if(!b) return;
+  b.disabled=!ok;
+  $('#punchHint').textContent = ok ? 'Sab ready — punch dabao ✅'
+    : !cam.pos ? 'GPS lock hone do'
+    : !zoneOk ? 'Office location par pahunch kar punch karo'
+    : 'Selfie lena baaki hai';
+}
+async function doPunch(){
+  const b=$('#punchBtn'); b.disabled=true; b.innerHTML='<span class="spin"></span> Saving…';
+  try{
+    const r = await api('punch', {photoBase64:cam.photo, lat:cam.pos.lat, lng:cam.pos.lng, accuracy:cam.pos.accuracy, device:navigator.userAgent.slice(0,110)});
+    toast(`✅ ${r.type} saved — ${fmtT(r.time)}`, 'ok');
+    const d = await api('init'); S.today=d.today; cam.photo=null;
+    renderPunch();
+  }catch(e){ toast(e.message,'err'); b.disabled=false; b.innerHTML='Punch'; }
+}
+
+/* ================= CALENDAR VIEW ================= */
+const CAL_BG = { 'Present':'var(--good)','Working':'var(--blue)','Half Day':'var(--warn)','Absent':'var(--crit)','Paid Leave':'var(--violet)','Week Off':'var(--muted)','Holiday':'var(--muted)','Festival Holiday':'var(--aqua)' };
+function calendarView(rows, month){
+  // ek employee ke month ka calendar grid
+  const [y,m]=month.split('-').map(Number);
+  const daysInMonth=new Date(y,m,0).getDate();
+  const firstDow=new Date(y,m-1,1).getDay();
+  const byDate={}; rows.forEach(r=>byDate[r.date]=r);
+  const today=new Date().toISOString().slice(0,10);
+  let cells='';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>cells+=`<div style="text-align:center;font-size:11px;font-weight:700;color:var(--muted);padding:6px 0">${d}</div>`);
+  for(let i=0;i<firstDow;i++) cells+='<div></div>';
+  for(let d=1;d<=daysInMonth;d++){
+    const ds=month+'-'+String(d).padStart(2,'0');
+    const r=byDate[ds];
+    const col=r?CAL_BG[r.status]:'transparent';
+    const future=ds>today;
+    const tip=r?`${fmtDW(ds)}\\n${r.status}${r.late?' · Late':''}${r.punchIn?'\\nIn '+fmtT(r.punchIn):''}${r.punchOut?' · Out '+fmtT(r.punchOut):''}${r.hoursText?'\\n'+r.hoursText:''}`:fmtDW(ds);
+    cells+=`<div onmousemove="tipShow(event,'${tip}')" onmouseleave="tipHide()" style="aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+      background:${r?'color-mix(in srgb,'+col+' 14%, var(--surface))':'var(--surface2)'};border:1.5px solid ${ds===today?'var(--gold)':r?'color-mix(in srgb,'+col+' 35%, transparent)':'var(--hairline)'};${future?'opacity:.35':''}">
+      <span style="font-size:12.5px;font-weight:700">${d}</span>
+      ${r?`<span style="width:8px;height:8px;border-radius:50%;background:${col}"></span>`:''}
+      ${r&&r.late?'<span style="font-size:8px;color:var(--serious);font-weight:800">LATE</span>':''}</div>`;
+  }
+  const legend=Object.entries({Present:'var(--good)','Half Day':'var(--warn)',Absent:'var(--crit)','Paid Leave':'var(--violet)','Week Off / Holiday':'var(--muted)'})
+    .map(([n,c])=>`<span><i style="background:${c}"></i>${n}</span>`).join('');
+  return `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${cells}</div><div class="legend">${legend}</div>`;
+}
+
+/* ================= REPORTS ================= */
+let repFilter={emp:'', status:'', mode:'table'};
+async function renderReports(){
+  loadingView('Reports ban rahi hai…');
+  let d; try{ d=await api('getReports',{month:S.month}); }catch(e){ return errView(e); }
+  S.cache.reports=d.rows;
+  const isHR=['HR','Admin'].includes(S.profile.role);
+  const emps=[...new Set(d.rows.map(r=>r.name))].sort();
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>Reports</h2><div class="sub">Daily attendance summary — live computed, kabhi stale nahi</div></div>
+  <div class="top-actions">
+    ${isHR?`<select class="searchbox" id="repEmp" onchange="repFilter.emp=this.value;drawReports()"><option value="">Saare employees</option>${emps.map(e=>`<option ${repFilter.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select>`:''}
+    <select class="searchbox" style="max-width:150px" id="repSt" onchange="repFilter.status=this.value;drawReports()">
+      <option value="">Saare status</option>${['Present','Half Day','Absent','Paid Leave','Week Off','Festival Holiday'].map(s=>`<option ${repFilter.status===s?'selected':''}>${s}</option>`).join('')}</select>
+    ${monthPicker('renderReports()')}
+    <div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">☰ Table</button>
+    <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">▦ Calendar</button></div>
+    <button class="btn btn-o" onclick="exportReportsCSV()">⬇ CSV</button>
+  </div></div>
+  <div class="grid g4" style="margin-bottom:16px" id="repTiles"></div>
+  <div id="repBody"></div>`;
+  drawReports();
+}
+function drawReports(){
+  let rows=S.cache.reports||[];
+  if(repFilter.emp) rows=rows.filter(r=>r.name===repFilter.emp);
+  if(repFilter.status) rows=rows.filter(r=>r.status===repFilter.status);
+  const sm={present:0,half:0,absent:0,leave:0};
+  rows.forEach(r=>{ if(r.status==='Present'||r.status==='Working')sm.present++; else if(r.status==='Half Day')sm.half++; else if(r.status==='Absent')sm.absent++; else if(r.status==='Paid Leave')sm.leave++; });
+  $('#repTiles').innerHTML = tile('Present',sm.present,'records','var(--good)')+tile('Half Day',sm.half,'records','var(--warn)')+tile('Absent',sm.absent,'records','var(--crit)')+tile('Paid Leave',sm.leave,'records','var(--violet)');
+
+  if(repFilter.mode==='cal'){
+    // calendar hamesha EK employee ka dikhta hai
+    const isHR=['HR','Admin'].includes(S.profile.role);
+    const all=S.cache.reports||[];
+    const who = repFilter.emp || (isHR ? (all.find(r=>r.email===S.profile.email)?.name || (all[0]&&all[0].name) || '') : S.profile.name);
+    const calRows = all.filter(r=>r.name===who);
+    $('#repBody').innerHTML = `<div class="card" style="max-width:560px"><h3>${esc(who)} — ${MONTH_NAME(S.month)}</h3>
+      <div class="chart-sub">${isHR?'Employee dropdown se kisi ka bhi calendar dekho':'Aapka apna attendance calendar'}</div>
+      ${calendarView(calRows, S.month)}</div>`;
+    return;
+  }
+  $('#repBody').innerHTML='<div class="tbl-wrap"><table id="repTable"></table></div>';
+  const sorted=[...rows].sort((a,b)=> b.date===a.date ? a.name.localeCompare(b.name) : b.date.localeCompare(a.date));
+  $('#repTable').innerHTML=`<thead><tr><th>Date</th><th>Employee</th><th>Shift</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th><th>Proof</th></tr></thead>
+  <tbody>${sorted.length?sorted.map(r=>`<tr>
+    <td>${fmtDW(r.date)}</td>
+    <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)}</div></div></div></td>
+    <td class="num">${fmtT(r.timing)}</td>
+    <td class="num">${r.punchIn?fmtT(r.punchIn):'—'}</td>
+    <td class="num">${r.punchOut?fmtT(r.punchOut):'—'}</td>
+    <td class="num">${r.hoursText||'—'}</td>
+    <td>${chip(r.status)}${r.late?' <span class="chip c-late">Late</span>':''}</td>
+    <td>${r.photoIn?`<a href="${esc(r.photoIn)}" target="_blank" title="Selfie">📷</a>`:''} ${r.mapIn?`<a href="${esc(r.mapIn)}" target="_blank" title="Location">📍</a>`:''}</td>
+  </tr>`).join(''):'<tr><td colspan="8"><div class="empty">Koi record nahi mila</div></td></tr>'}</tbody>`;
+}
+function exportReportsCSV(){
+  const rows=S.cache.reports||[];
+  const head=['Date','Employee','Code','Shift','Punch In','Punch Out','Hours','Status','Late','Leave Type'];
+  const csv=[head.join(',')].concat(rows.map(r=>[r.date,`"${r.name}"`,r.code,r.timing,r.punchIn||'',r.punchOut||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].join(','))).join('\n');
+  dl(csv,'attendance_report_'+S.month+'.csv');
+}
+function dl(text,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click(); }
+
+/* ================= LEAVE ================= */
+async function renderLeave(){
+  loadingView('Leave records…');
+  let d; try{ d=await api('getLeaves'); }catch(e){ return errView(e); }
+  const isHR=['HR','Admin'].includes(S.profile.role);
+  const pending=d.leaves.filter(l=>String(l.status).toLowerCase()==='pending'||l.status==='');
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>Leave</h2><div class="sub">${isHR?'Team ki applications approve/reject karo':'Apni leave apply karo aur status dekho'}</div></div>
+  <div class="top-actions"><button class="btn btn-gold" onclick="leaveModal()">+ Apply Leave</button></div></div>
+  ${isHR&&pending.length?`<div class="card" style="margin-bottom:16px;border-left:4px solid var(--warn)"><h3>⏳ ${pending.length} pending approval${pending.length>1?'s':''}</h3></div>`:''}
+  <div class="tbl-wrap"><table>
+    <thead><tr>${isHR?'<th>Employee</th>':''}<th>Type</th><th>From</th><th>To</th><th>Days</th><th>Remarks</th><th>Status</th>${isHR?'<th>Action</th>':''}</tr></thead>
+    <tbody>${d.leaves.length?d.leaves.map(l=>{
+      const st=(l.status||'Pending');
+      const cls=st.toLowerCase()==='approved'?'c-approved':st.toLowerCase()==='rejected'?'c-rejected':'c-pending';
+      return `<tr>${isHR?`<td><div class="who"><div class="avatar">${INITIALS(l.name)}</div><div>${esc(l.name)}</div></div></td>`:''}
+      <td>${esc(l.type)}</td><td>${fmtD(l.start)}</td><td>${fmtD(l.end)}</td><td class="num">${l.days}</td>
+      <td style="white-space:normal;max-width:220px">${esc(l.remarks||'—')}</td>
+      <td><span class="chip ${cls}">${esc(st)}</span></td>
+      ${isHR?`<td>${st.toLowerCase()==='pending'||st===''?`
+        <button class="btn btn-good btn-sm" onclick="decideLeave('${l.id}','Approved')">✓</button>
+        <button class="btn btn-danger btn-sm" onclick="decideLeave('${l.id}','Rejected')">✗</button>`:(esc(l.approvedBy||''))}</td>`:''}</tr>`;
+    }).join(''):`<tr><td colspan="8"><div class="empty"><div class="ic">🌴</div>Koi leave record nahi</div></td></tr>`}</tbody></table></div>`;
+}
+function leaveModal(){
+  modal(`<h3>Apply Leave</h3><div class="msub">Approved paid leave payout mein Absent nahi ginegi (SOP 9.2)</div>
+  <label>Leave Type</label><select id="lvType">${S.leaveTypes.map(t=>`<option>${t}</option>`).join('')}</select>
+  <div class="grid g2"><div><label>From</label><input type="date" id="lvStart" value="${new Date().toISOString().slice(0,10)}"></div>
+  <div><label>To</label><input type="date" id="lvEnd" value="${new Date().toISOString().slice(0,10)}"></div></div>
+  <label>Reason / Remarks</label><textarea id="lvRem" rows="3" placeholder="Clear reason likho…"></textarea>
+  <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
+  <button class="btn btn-p" onclick="submitLeave(this)">Submit</button></div>`);
+}
+async function submitLeave(btn){
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  try{
+    await api('applyLeave',{leaveType:$('#lvType').value,startDate:$('#lvStart').value,endDate:$('#lvEnd').value,remarks:$('#lvRem').value});
+    closeModal(); toast('Leave request submit ho gayi ✅','ok'); renderLeave();
+  }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Submit'; }
+}
+async function decideLeave(id,decision){
+  try{ await api('decideLeave',{id,decision}); toast('Leave '+decision,'ok'); renderLeave(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+/* ================= USERS (HR) ================= */
+async function renderUsers(){
+  loadingView('Employees…');
+  let d; try{ d=await api('getUsers'); }catch(e){ return errView(e); }
+  S.cache.users=d.users;
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>Employees</h2><div class="sub">User master — ${d.users.length} employees (${d.users.filter(u=>String(u.status).toLowerCase()==='active').length} active)</div></div>
+  <div class="top-actions"><input class="searchbox" placeholder="🔍 Search…" oninput="drawUsers(this.value)">
+  <button class="btn btn-gold" onclick="userModal()">+ Add Employee</button></div></div>
+  <div class="tbl-wrap"><table id="usersTable"></table></div>`;
+  drawUsers('');
+}
+function drawUsers(q){
+  q=(q||'').toLowerCase();
+  const users=(S.cache.users||[]).filter(u=>!q||u.name.toLowerCase().includes(q)||u.email.includes(q)||String(u.code).includes(q));
+  $('#usersTable').innerHTML=`<thead><tr><th>Employee</th><th>Code</th><th>Shift</th><th>Type</th><th>Role</th><th>Department</th><th>Week Off</th><th>Status</th><th></th></tr></thead>
+  <tbody>${users.map(u=>`<tr>
+    <td><div class="who"><div class="avatar">${INITIALS(u.name)}</div><div><div>${esc(u.name)}</div><div class="em">${esc(u.email)}</div></div></div></td>
+    <td class="num">#${esc(u.code)}</td><td class="num">${fmtT(u.timing)}</td><td>${esc(u.type)}</td>
+    <td>${esc(u.role)}</td><td>${esc(u.department||'—')}</td><td>${esc(u.weekOffDay)}</td>
+    <td><span class="chip ${String(u.status).toLowerCase()==='active'?'c-approved':'c-rejected'}">${esc(u.status)}</span></td>
+    <td><button class="btn btn-o btn-sm" onclick='userModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button></td></tr>`).join('')}</tbody>`;
+}
+function userModal(u){
+  const isAdmin=S.profile.role==='Admin';
+  u=u||{};
+  modal(`<h3>${u.email?'Edit':'Add'} Employee</h3><div class="msub">Useremail unique hona chahiye — yahi primary key hai (SOP 8)</div>
+  <div class="grid g2"><div><label>Full Name *</label><input id="uName" value="${esc(u.name||'')}"></div>
+  <div><label>Employee Code *</label><input id="uCode" value="${esc(u.code||'')}"></div></div>
+  <label>Google Email * ${u.email?'(change mat karo — history break hogi)':''}</label><input id="uEmail" value="${esc(u.email||'')}" ${u.email?'readonly style="opacity:.6"':''} placeholder="name@oakcraft.in">
+  <div class="grid g2"><div><label>Shift Start</label><input type="time" id="uTiming" value="${esc((u.timing||'09:30').slice(0,5))}"></div>
+  <div><label>Week Off Day</label><select id="uWeekOff">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=>`<option ${u.weekOffDay===d?'selected':''}>${d}</option>`).join('')}</select></div></div>
+  <div class="grid g2"><div><label>Employee Type <span style="font-weight:400;color:var(--muted)">— Staff=selfie zaroori, Labour=sirf location</span></label><select id="uType"><option ${u.type==='Staff'?'selected':''}>Staff</option><option ${u.type==='Labour'?'selected':''}>Labour</option><option ${u.type==='Worker'?'selected':''}>Worker</option></select></div>
+  <div><label>Role</label><select id="uRole" ${!isAdmin?'disabled':''}>${['Employee','HR','Admin'].map(r=>`<option ${u.role===r?'selected':''}>${r}</option>`).join('')}</select></div></div>
+  <div class="grid g2"><div><label>Department</label><input id="uDept" value="${esc(u.department||'')}"></div>
+  <div><label>Designation</label><input id="uDesig" value="${esc(u.designation||'')}"></div></div>
+  <div class="grid g2"><div><label>Basic Salary (₹/month)</label><input type="number" id="uSalary" value="${u.basicSalary||''}"></div>
+  <div><label>Status</label><select id="uStatus"><option ${u.status==='Active'?'selected':''}>Active</option><option ${u.status==='Inactive'?'selected':''}>Inactive</option></select></div></div>
+  <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
+  <button class="btn btn-p" onclick="saveUser(this)">Save</button></div>`);
+}
+async function saveUser(btn){
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  try{
+    await api('saveUser',{name:$('#uName').value.trim(), code:$('#uCode').value.trim(), email:$('#uEmail').value.trim(),
+      timing:$('#uTiming').value, weekOffDay:$('#uWeekOff').value, type:$('#uType').value, role:$('#uRole').value,
+      department:$('#uDept').value, designation:$('#uDesig').value, basicSalary:$('#uSalary').value, status:$('#uStatus').value});
+    closeModal(); toast('Employee saved ✅','ok'); renderUsers();
+  }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save'; }
+}
+
+/* ================= PAYOUT (HR) ================= */
+async function renderPayout(){
+  loadingView('Payroll compute ho raha hai…');
+  let d; try{ d=await api('getPayout',{month:S.month}); }catch(e){ return errView(e); }
+  S.cache.payout=d;
+  const total=d.rows.reduce((a,r)=>a+r.net,0);
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (live AppSheet jaisa)'}</div></div>
+  <div class="top-actions">${monthPicker('renderPayout()')}<button class="btn btn-o" onclick="exportPayoutCSV()">⬇ CSV</button></div></div>
+  <div class="grid g3" style="margin-bottom:16px">
+    ${tile('Total Payable', INR(total), d.rows.length+' employees','var(--good)')}
+    ${tile('Total Advance', INR(d.rows.reduce((a,r)=>a+r.advance,0)),'is month deduct hoga','var(--warn)')}
+    ${tile('Absent Days', d.rows.reduce((a,r)=>a+r.absent,0)+' + '+d.rows.reduce((a,r)=>a+r.halfDays,0)+' half','poore team ke','var(--crit)')}
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
+    <tbody>${d.rows.map((r,i)=>`<tr>
+      <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)} ${r.saved?'· <b style="color:var(--goodtext)">saved</b>':''}</div></div></div></td>
+      <td class="num">${r.workingDays-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
+      <td class="num"><b>${r.payableDays}</b> / ${r.totalDays}</td>
+      <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
+      <td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
+      <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
+      <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
+      <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
+      <button class="btn btn-o btn-sm" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
+  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Total Days − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
+}
+function payModal(i){
+  const r=S.cache.payout.rows[i];
+  modal(`<h3>${esc(r.name)} — ${MONTH_NAME(r.month)}</h3><div class="msub">Advance / basic verify karke save karo — Payout sheet mein record hoga</div>
+  <div class="grid g3" style="margin:14px 0;text-align:center">
+    <div class="tile" style="padding:12px"><div class="k">Absent</div><div class="v" style="font-size:20px">${r.absent}</div></div>
+    <div class="tile" style="padding:12px"><div class="k">Half Days</div><div class="v" style="font-size:20px">${r.halfDays}</div></div>
+    <div class="tile" style="padding:12px"><div class="k">Paid Leave</div><div class="v" style="font-size:20px">${r.paidLeave}</div></div>
+  </div>
+  <label>Basic Salary</label><input type="number" id="pBasic" value="${r.basicSalary}">
+  <label>Advance Salary (deduct hoga)</label><input type="number" id="pAdv" value="${r.advance}">
+  <label>Late Deduction (₹) — ${r.lateDays} late days (${r.chargeableLate} chargeable)</label><input type="number" id="pLate" value="${r.lateDeduction}">
+  <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
+  <button class="btn btn-p" onclick="savePayout(${i},'Draft',this)">Save Draft</button>
+  <button class="btn btn-good" onclick="savePayout(${i},'Final',this)">Save Final</button></div>`);
+}
+async function savePayout(i,status,btn){
+  const r=S.cache.payout.rows[i];
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  try{
+    await api('savePayout',{month:r.month,email:r.email,basicSalary:$('#pBasic').value,advance:$('#pAdv').value,lateDeduction:$('#pLate').value,status});
+    closeModal(); toast('Payout saved ('+status+') ✅','ok'); renderPayout();
+  }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save'; }
+}
+function payslip(i){
+  const r=S.cache.payout.rows[i];
+  $('#payslipArea').innerHTML=`
+  <div style="max-width:640px;margin:0 auto;font-family:system-ui;color:#111">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #0f1420;padding-bottom:14px">
+      <div><h1 style="font-size:22px;margin:0">OAKCRAFT</h1><div style="font-size:12px;color:#666">Salary Slip — ${MONTH_NAME(r.month)}</div></div>
+      <div style="width:46px;height:46px;border-radius:12px;background:#0f1420;color:#e8b34b;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800">O</div></div>
+    <table style="width:100%;font-size:13px;margin-top:14px;border-collapse:collapse">
+      <tr><td style="padding:6px 0;color:#666">Employee</td><td style="text-align:right;font-weight:700">${esc(r.name)} (#${esc(r.code)})</td></tr>
+      <tr><td style="padding:6px 0;color:#666">Department / Designation</td><td style="text-align:right">${esc(r.department||'—')} / ${esc(r.designation||'—')}</td></tr>
+      <tr><td colspan="2" style="border-top:1px solid #ddd;padding-top:10px"></td></tr>
+      <tr><td style="padding:5px 0">Total Days in Month</td><td style="text-align:right">${r.totalDays}</td></tr>
+      <tr><td style="padding:5px 0">Working Days</td><td style="text-align:right">${r.workingDays}</td></tr>
+      <tr><td style="padding:5px 0">Absent / Half Days</td><td style="text-align:right">${r.absent} / ${r.halfDays}</td></tr>
+      <tr><td style="padding:5px 0">Paid Leave · Week Off · Festival</td><td style="text-align:right">${r.paidLeave} · ${r.weekOff} · ${r.festival}</td></tr>
+      <tr><td style="padding:5px 0;font-weight:700">Total Days Payable</td><td style="text-align:right;font-weight:700">${r.payableDays}</td></tr>
+      <tr><td colspan="2" style="border-top:1px solid #ddd;padding-top:10px"></td></tr>
+      <tr><td style="padding:5px 0">Basic Salary</td><td style="text-align:right">${INR(r.basicSalary)}</td></tr>
+      <tr><td style="padding:5px 0">Per-Day Rate</td><td style="text-align:right">${INR(r.perDay)}</td></tr>
+      <tr><td style="padding:5px 0">Gross Earned (${r.payableDays} × ${INR(r.perDay)})</td><td style="text-align:right">${INR(r.gross)}</td></tr>
+      <tr><td style="padding:5px 0;color:#c00">Advance Salary</td><td style="text-align:right;color:#c00">− ${INR(r.advance)}</td></tr>
+      <tr><td style="padding:5px 0;color:#c00">Late Deduction (${r.lateDays} late)</td><td style="text-align:right;color:#c00">− ${INR(r.lateDeduction)}</td></tr>
+      <tr><td style="padding:12px 0;font-size:17px;font-weight:800;border-top:2px solid #0f1420">NET PAYABLE</td>
+      <td style="text-align:right;font-size:17px;font-weight:800;border-top:2px solid #0f1420">${INR(r.net)}</td></tr>
+    </table>
+    <div style="font-size:10.5px;color:#999;margin-top:26px">Computer-generated payslip · OakCraft Attendance System · ${new Date().toLocaleDateString('en-IN')}</div>
+  </div>`;
+  window.print();
+}
+function exportPayoutCSV(){
+  const d=S.cache.payout;
+  const head=['Month','Code','Name','Total Days','Working Days','Absent','Half Days','Paid Leave','Week Off','Festival','Payable Days','Basic','Per Day','Gross','Advance','Late Days','Late Deduction','Net Payable'];
+  const csv=[head.join(',')].concat(d.rows.map(r=>[r.month,r.code,`"${r.name}"`,r.totalDays,r.workingDays,r.absent,r.halfDays,r.paidLeave,r.weekOff,r.festival,r.payableDays,r.basicSalary,r.perDay,r.gross,r.advance,r.lateDays,r.lateDeduction,r.net].join(','))).join('\n');
+  dl(csv,'payout_'+d.month+'.csv');
+}
+
+/* ================= SETTINGS (Admin) ================= */
+async function renderSettings(){
+  loadingView('Settings…');
+  let s,h,audit=[]; try{ s=await api('getSettings'); h=(await api('getHolidays')).holidays; audit=(await api('getAudit')).rows||[]; }catch(e){ return errView(e); }
+  const F = (k,label,hint,type='number') => `<label>${label} <span style="font-weight:400;color:var(--muted)">— ${hint}</span></label><input type="${type}" data-k="${k}" value="${esc(s[k]??'')}">`;
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>Settings</h2><div class="sub">System rules — sirf Admin edit kar sakta hai</div></div></div>
+  <div class="grid g2" style="align-items:start">
+    <div class="card"><h3>Attendance Rules</h3>
+      ${F('full_day_hours','Full day hours','itne ghante = Present')}
+      ${F('half_day_hours','Half day hours','isse kam = short')}
+      ${F('grace_minutes','Grace minutes','shift ke baad itni der tak late nahi')}
+      <label>Per-day rate basis</label>
+      <select data-k="per_day_rate_basis"><option value="total_days" ${s.per_day_rate_basis==='total_days'?'selected':''}>Calendar days (live AppSheet jaisa)</option>
+      <option value="working_days" ${s.per_day_rate_basis==='working_days'?'selected':''}>Working days (SOP 12.1)</option></select>
+      ${F('allowed_late_count','Free late days / month','iske baad deduction')}
+      ${F('late_deduction_per_late','Late deduction (₹ per late)','har chargeable late par')}
+      <label>Email notifications <span style="font-weight:400;color:var(--muted)">— leave apply/approve + final payout par mail</span></label>
+      <select data-k="email_notifications"><option value="yes" ${String(s.email_notifications).toLowerCase()!=='no'?'selected':''}>Yes</option><option value="no" ${String(s.email_notifications).toLowerCase()==='no'?'selected':''}>No</option></select>
+      <h3 style="margin-top:22px">Geo-fence (optional)</h3>
+      ${F('geofence_lat','Office Latitude','blank = off','text')}
+      ${F('geofence_lng','Office Longitude','blank = off','text')}
+      ${F('geofence_radius_m','Radius (meters)','0 = koi restriction nahi')}
+      <div class="modal-foot" style="justify-content:flex-start"><button class="btn btn-p" onclick="saveSettings(this)">Save Settings</button></div>
+    </div>
+    <div class="card"><h3>Holidays</h3><div class="chart-sub">Festival = paid holiday, payout mein count hota hai</div>
+      <div class="grid g2"><div><label>Date</label><input type="date" id="hDate"></div>
+      <div><label>Type</label><select id="hType"><option>Festival</option><option>Holiday</option></select></div></div>
+      <label>Name</label><input id="hName" placeholder="e.g. Diwali">
+      <div class="modal-foot" style="justify-content:flex-start"><button class="btn btn-gold" onclick="addHoliday(this)">+ Add Holiday</button></div>
+      <div class="timeline" style="margin-top:14px">${h.map(x=>`<div class="ti"><span class="tdot" style="background:var(--violet)"></span>
+        <div><div class="tt">${fmtDW(x.date)}</div><div class="ty">${esc(x.name)} · ${esc(x.type)}</div></div>
+        <button class="btn btn-o btn-sm" style="margin-left:auto" onclick="delHoliday('${x.date}','${esc(x.name)}')">🗑</button></div>`).join('')||'<div class="empty" style="padding:16px">Koi holiday nahi</div>'}</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>🛡️ Audit Log</h3><div class="chart-sub">Recent activity — kaun kya change kar raha hai (Audit sheet mein full history)</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Who</th><th>Role</th><th>Action</th><th>Details</th></tr></thead>
+    <tbody>${audit.length?audit.slice(0,30).map(a=>`<tr><td class="num">${esc(String(a.ts).slice(0,16))}</td><td>${esc(a.who)}</td><td>${esc(a.role)}</td><td><b>${esc(a.action)}</b></td><td style="white-space:normal;max-width:340px;font-size:12px;color:var(--ink2)">${esc(a.details)}</td></tr>`).join(''):'<tr><td colspan="5"><div class="empty">Abhi koi activity nahi</div></td></tr>'}</tbody></table></div>
+  </div>`;
+}
+async function saveSettings(btn){
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  const p={}; document.querySelectorAll('[data-k]').forEach(el=>p[el.dataset.k]=el.value);
+  try{ await api('saveSettings',p); toast('Settings saved ✅','ok'); renderSettings(); }
+  catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save Settings'; }
+}
+async function addHoliday(btn){
+  if(!$('#hDate').value||!$('#hName').value) return toast('Date aur name dono bharo','err');
+  btn.disabled=true;
+  try{ await api('saveHoliday',{date:$('#hDate').value,name:$('#hName').value,type:$('#hType').value}); toast('Holiday added ✅','ok'); renderSettings(); }
+  catch(e){ toast(e.message,'err'); btn.disabled=false; }
+}
+async function delHoliday(date,name){
+  try{ await api('deleteHoliday',{date,name}); toast('Holiday removed','ok'); renderSettings(); }
+  catch(e){ toast(e.message,'err'); }
+}
+</script>
+</body>
+</html>
