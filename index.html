@@ -285,7 +285,7 @@ async function api(action, payload={}, opts={}){
   });
   const j = await res.json();
   if(!j.ok){
-    if(String(j.error).startsWith('AUTH:') && !opts.noRelogin){ sessionStorage.removeItem('oc_tok'); }
+    if(String(j.error).startsWith('AUTH:') && !opts.noRelogin){ ocClearToken(); }
     throw new Error(j.error||'Request failed');
   }
   return j.data;
@@ -298,25 +298,34 @@ window.addEventListener('load', () => {
     $('#loginErr').textContent='⚙️ Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3–5).';
   }
   const t = setInterval(()=>{ if(window.google?.accounts?.id){ clearInterval(t); initGSI(); } }, 120);
-  const saved = sessionStorage.getItem('oc_tok');
-  if(saved){ S.token = saved; boot().catch(()=>{ sessionStorage.removeItem('oc_tok'); }); }
+  const saved = ocGetToken();
+  if(saved){ S.token = saved; boot().catch(()=>{ ocClearToken(); }); }
 });
 function initGSI(){
   google.accounts.id.initialize({ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true });
   google.accounts.id.renderButton($('#gbtn'), { theme:'filled_black', size:'large', shape:'pill', width:300, text:'signin_with' });
 }
-function onCred(resp){ S.token = resp.credential; sessionStorage.setItem('oc_tok', S.token); boot(); }
-function logout(){ sessionStorage.removeItem('oc_tok'); try{google.accounts.id.disableAutoSelect();}catch(e){} location.reload(); }
+function onCred(resp){ S.token = resp.credential; ocSaveToken(S.token,true); boot(); }
+function logout(){ ocClearToken(); try{google.accounts.id.disableAutoSelect();}catch(e){} location.reload(); }
 /* ===== THEME (dark / light) ===== */
 function applyTheme(t){ if(t==='dark'){ document.documentElement.setAttribute('data-theme','dark'); } else { document.documentElement.removeAttribute('data-theme'); } }
 function toggleTheme(){ const cur = document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'; const next = cur==='dark' ? 'light' : 'dark'; try{ localStorage.setItem('oc_theme', next); }catch(e){} applyTheme(next); }
+/* ===== SESSION / TOKEN STORAGE =====
+   Regular users stay logged in across browser sessions (localStorage).
+   Admin & HR are kept only in sessionStorage, so they must re-login each
+   browser session for security. Role is applied once the profile loads. */
+var OC_TOK_KEY='oc_tok';
+function ocSaveToken(tok, persist){ try{ if(persist){ localStorage.setItem(OC_TOK_KEY,tok); sessionStorage.removeItem(OC_TOK_KEY); } else { sessionStorage.setItem(OC_TOK_KEY,tok); localStorage.removeItem(OC_TOK_KEY); } }catch(e){ try{ sessionStorage.setItem(OC_TOK_KEY,tok); }catch(_e){} } }
+function ocGetToken(){ try{ return sessionStorage.getItem(OC_TOK_KEY) || localStorage.getItem(OC_TOK_KEY); }catch(e){ return null; } }
+function ocClearToken(){ try{ sessionStorage.removeItem(OC_TOK_KEY); localStorage.removeItem(OC_TOK_KEY); }catch(e){} }
+function ocApplyRoleStorage(role){ var priv = ['Admin','HR'].indexOf(role) !== -1; if(S.token){ ocSaveToken(S.token, !priv); } }
 
 async function boot(){
   $('#loginErr').style.display='none';
   $('#gbtn').innerHTML='<div class="spin"></div>';
   try{
     const d = await api('init', {}, {noRelogin:true});
-    S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes; S.geofence=d.geofence||null;
+    S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes; S.geofence=d.geofence||null; ocApplyRoleStorage(S.profile&&S.profile.role);
     $('#loginScreen').style.display='none';
     $('#app').style.display='block';
     buildNav(); go('dashboard');
