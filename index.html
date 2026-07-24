@@ -722,7 +722,7 @@ function drawReports(){
     const who = repFilter.emp || (isHR ? (all.find(r=>r.email===S.profile.email)?.name || (all[0]&&all[0].name) || '') : S.profile.name);
     const calRows = all.filter(r=>r.name===who);
     $('#repBody').innerHTML = `<div class="card" style="max-width:560px"><h3>${esc(who)} — ${MONTH_NAME(S.month)}</h3>
-      <div class="chart-sub">${isHR?'View anyone's calendar from the employee dropdown':'Your own attendance calendar'}</div>
+      <div class="chart-sub">${isHR?'View any employee calendar from the dropdown':'Your own attendance calendar'}</div>
       ${calendarView(calRows, S.month)}</div>`;
     return;
   }
@@ -755,7 +755,7 @@ async function renderLeave(){
   const isHR=['HR','Admin'].includes(S.profile.role);
   const pending=d.leaves.filter(l=>String(l.status).toLowerCase()==='pending'||l.status==='');
   $('#main').innerHTML=`
-  <div class="topbar"><div><h2>Leave</h2><div class="sub">${isHR?'Approve/reject the team's applications':'Apply for leave and check status'}</div></div>
+  <div class="topbar"><div><h2>Leave</h2><div class="sub">${isHR?'Approve/reject team applications':'Apply for leave and check status'}</div></div>
   <div class="top-actions"><button class="btn btn-gold" onclick="leaveModal()">+ Apply Leave</button></div></div>
   ${isHR&&pending.length?`<div class="card" style="margin-bottom:16px;border-left:4px solid var(--warn)"><h3>⏳ ${pending.length} pending approval${pending.length>1?'s':''}</h3></div>`:''}
   <div class="tbl-wrap"><table>
@@ -830,7 +830,7 @@ function userModal(u){
   modal(`<h3>${u.email?'Edit':'Add'} Employee</h3><div class="msub">Useremail unique hona chahiye — yahi primary key hai (SOP 8)</div>
   <div class="grid g2"><div><label>Full Name *</label><input id="uName" value="${esc(u.name||'')}"></div>
   <div><label>Employee Code *</label><input id="uCode" value="${esc(u.code||'')}"></div></div>
-  <label>Google Email * ${u.email?'(don't change — history will break)':''}</label><input id="uEmail" value="${esc(u.email||'')}" ${u.email?'readonly style="opacity:.6"':''} placeholder="name@oakcraft.in">
+  <label>Google Email * ${u.email?'(do not change — history will break)':''}</label><input id="uEmail" value="${esc(u.email||'')}" ${u.email?'readonly style="opacity:.6"':''} placeholder="name@oakcraft.in">
   <div class="grid g2"><div><label>Shift Start</label><input type="time" id="uTiming" value="${esc((u.timing||'09:30').slice(0,5))}"></div>
   <div><label>Week Off Day</label><select id="uWeekOff">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=>`<option ${u.weekOffDay===d?'selected':''}>${d}</option>`).join('')}</select></div></div>
   <div class="grid g2"><div><label>Employee Type <span style="font-weight:400;color:var(--muted)">— Staff = selfie required, Labour = location only</span></label><select id="uType"><option ${u.type==='Staff'?'selected':''}>Staff</option><option ${u.type==='Labour'?'selected':''}>Labour</option><option ${u.type==='Worker'?'selected':''}>Worker</option></select></div>
