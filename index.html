@@ -8,6 +8,13 @@
 <title>OakCraft Attendance</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f1420'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23e8b34b' font-family='Arial' font-weight='bold'>O</text></svg>">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="preconnect" href="https://accounts.google.com" crossorigin>
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+<link rel="dns-prefetch" href="https://script.google.com">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 /* ============ OAKCRAFT ATTENDANCE — PREMIUM UI ============ */
 :root{
@@ -1100,6 +1107,80 @@ async function delHoliday(date,name){
   try{ await api('deleteHoliday',{date,name}); toast('Holiday removed','ok'); renderSettings(); }
   catch(e){ toast(e.message,'err'); }
 }
+
+/* ============ SPEED + OFFLINE LAYER ============ */
+var OC_READS = ['init','getDashboard','getReports','getMyAttendance','getLeaves','getUsers','getPayout','getSettings','getHolidays','getRawAttendance','getAudit','getAccessRequests'];
+var OC_NORERENDER = ['init'];
+var OC_INFLIGHT = {};
+var OC_RERENDERED = {};
+function ocKey(a,p){ try{ return 'occ:'+a+':'+JSON.stringify(p||{}); }catch(e){ return 'occ:'+a; } }
+function ocGet(k){ try{ var v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } }
+function ocSet(k,d){ try{ localStorage.setItem(k, JSON.stringify({t:Date.now(), d:d})); }catch(e){ ocTrim(); } }
+function ocTrim(){ try{ Object.keys(localStorage).forEach(function(k){ if(k.indexOf('occ:')===0) localStorage.removeItem(k); }); }catch(e){} }
+function ocAge(t){
+  var m=Math.round((Date.now()-t)/60000);
+  if(m<1) return 'abhi ka';
+  if(m<60) return m+' min purana';
+  var h=Math.round(m/60); if(h<24) return h+' ghante purana';
+  return Math.round(h/24)+' din purana';
+}
+function ocBanner(show,msg){
+  var el=document.getElementById('ocOffBar');
+  if(!el){
+    el=document.createElement('div'); el.id='ocOffBar';
+    el.style.cssText='position:fixed;left:0;right:0;top:0;z-index:300;background:#eda100;color:#151a26;font-size:12.5px;font-weight:700;text-align:center;padding:6px 10px;display:none';
+    document.body.appendChild(el);
+  }
+  if(msg) el.textContent=msg;
+  el.style.display = show ? 'block' : 'none';
+}
+function ocRerender(){
+  try{ if(typeof go==='function' && typeof S==='object' && S && S.view) go(S.view); }catch(e){}
+}
+(function(){
+  if(typeof api!=='function') return;
+  var ORIG = api;
+  window.api = function(action, payload, opts){
+    var isRead = OC_READS.indexOf(action) >= 0;
+    var offline = (navigator.onLine === false);
+    if(!isRead){
+      if(offline) return Promise.reject(new Error('Aap offline hain. Ye action internet ke bina nahi ho sakta.'));
+      return ORIG(action, payload, opts);
+    }
+    var key = ocKey(action, payload);
+    var cached = ocGet(key);
+    if(offline){
+      if(cached){ ocBanner(true, 'Offline - ' + ocAge(cached.t) + ' data dikha rahe hain'); return Promise.resolve(cached.d); }
+      return Promise.reject(new Error('Aap offline hain aur is screen ka saved data maujood nahi hai.'));
+    }
+    var net = OC_INFLIGHT[key];
+    if(!net){
+      net = ORIG(action, payload, opts).then(function(d){
+        delete OC_INFLIGHT[key];
+        var changed = !cached || JSON.stringify(cached.d) !== JSON.stringify(d);
+        ocSet(key, d);
+        ocBanner(false);
+        if(cached && changed && !OC_RERENDERED[key] && OC_NORERENDER.indexOf(action) < 0){
+          OC_RERENDERED[key] = 1;
+          setTimeout(ocRerender, 0);
+        }
+        return d;
+      }, function(err){ delete OC_INFLIGHT[key]; throw err; });
+      OC_INFLIGHT[key] = net;
+    }
+    if(cached){
+      net.catch(function(){ ocBanner(true, 'Server se connect nahi ho pa raha - ' + ocAge(cached.t) + ' data dikha rahe hain'); });
+      return Promise.resolve(cached.d);
+    }
+    return net;
+  };
+})();
+window.addEventListener('online', function(){ ocBanner(false); ocRerender(); });
+window.addEventListener('offline', function(){ ocBanner(true, 'Aap offline hain - saved data dikh raha hai'); });
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
+
 </script>
 </body>
 </html>
