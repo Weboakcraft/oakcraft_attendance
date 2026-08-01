@@ -1245,6 +1245,22 @@ function ocAssignCodes(rows){
   };
 })();
 
+
+/* ====== MODAL: bahar click karne par form band na ho ====== */
+(function(){
+  var st=document.createElement('style');
+  st.textContent='@keyframes ocShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}.oc-shake{animation:ocShake .3s ease}';
+  document.head.appendChild(st);
+  document.addEventListener('click', function(e){
+    var bg=document.getElementById('modalBg');
+    if(!bg || e.target!==bg) return;
+    e.stopPropagation();
+    e.preventDefault();
+    var box=document.getElementById('modalBox');
+    if(box){ box.classList.remove('oc-shake'); void box.offsetWidth; box.classList.add('oc-shake'); }
+  }, true);
+})();
+
 </script>
 </body>
 </html>
