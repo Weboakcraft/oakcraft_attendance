@@ -1,5 +1,5 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v1';
+var CACHE = 'oakcraft-shell-v2';
 var ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', function(e){
@@ -19,8 +19,11 @@ self.addEventListener('message', function(e){
   if(e.data === 'skipWaiting') self.skipWaiting();
 });
 
-/* Same-origin GET: stale-while-revalidate (instant open, background update).
-   Everything else (Google APIs, Apps Script, CDN) goes straight to network. */
+/* Same-origin GET: stale-while-revalidate.
+   Cached copy turant serve hoti hai, aur background me server se fresh
+   copy laakar cache update kar di jaati hai (HTTP cache bypass karke,
+   taaki naya deploy agli load par hi mil jaye).
+   Google APIs / Apps Script / CDN seedhe network par jaate hain. */
 self.addEventListener('fetch', function(e){
   var req = e.request;
   if(req.method !== 'GET') return;
@@ -30,7 +33,10 @@ self.addEventListener('fetch', function(e){
 
   e.respondWith(
     caches.match(req).then(function(hit){
-      var net = fetch(req).then(function(res){
+      var fresh;
+      try { fresh = new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }); }
+      catch(err){ fresh = req; }
+      var net = fetch(fresh).then(function(res){
         if(res && res.status === 200 && res.type === 'basic'){
           var copy = res.clone();
           caches.open(CACHE).then(function(c){ c.put(req, copy); });
