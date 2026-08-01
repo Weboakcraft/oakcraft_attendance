@@ -876,13 +876,12 @@ function impValid(r){
   if(!r.name) e.push('Name missing');
   var at=r.email.indexOf('@');
   if(at<1 || r.email.indexOf('.',at) < at+2) e.push('Email invalid');
-  if(!r.code) e.push('Code missing');
   return e;
 }
 function importModal(){
   IMP_ROWS=[];
   modal('<h3>Bulk Import Employees</h3>'
-   +'<p class="msub">Excel (.xlsx / .xls) ya CSV file upload karein. Pehli row me column headers honi chahiye.</p>'
+   +'<p class="msub">Excel (.xlsx / .xls) ya CSV file upload karein. Pehli row me column headers honi chahiye. Employee Code khaali chhod dein to automatically next code lag jayega.</p>'
    +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Sample CSV template download karein</a></div>'
    +'<label>Choose file</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv" onchange="impRead(this)">'
    +'<div id="impPrev" style="margin-top:14px"></div>'
@@ -922,6 +921,7 @@ function impPreview(){
   var prev=$('#impPrev'), go=$('#impGo');
   if(!IMP_ROWS.length){ prev.innerHTML='<span style="color:var(--crit)">File me koi row nahi mili.</span>'; go.disabled=true; return; }
   var existing=((S.cache&&S.cache.users)||[]).map(function(u){ return Object.keys(u).map(function(k){ return String(u[k]); }).join('|').toLowerCase(); });
+  ocAssignCodes(IMP_ROWS);
   var seen=[], ok=0, bad=0;
   var html='<div class="tbl-wrap" style="max-height:240px;overflow:auto"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Code</th><th>Status</th></tr></thead><tbody>';
   IMP_ROWS.forEach(function(r,i){
@@ -931,7 +931,7 @@ function impPreview(){
     var dup = r.email && existing.some(function(s){ return s.indexOf(r.email)>=0; });
     if(e.length){ bad++; } else { ok++; }
     var st = e.length ? '<span class="chip c-absent">'+esc(e.join(', '))+'</span>' : (dup ? '<span class="chip c-late">Update hoga</span>' : '<span class="chip c-present">Naya</span>');
-    html+='<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.code)+'</td><td>'+st+'</td></tr>';
+    html+='<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.code)+(r.autoCode?' <span class="msub" style="font-size:11px">(auto)</span>':'')+'</td><td>'+st+'</td></tr>';
   });
   html+='</tbody></table></div><p class="msub" style="margin-top:8px">'+ok+' valid row(s) import hongi, '+bad+' skip.</p>';
   prev.innerHTML=html;
@@ -1180,6 +1180,70 @@ window.addEventListener('offline', function(){ ocBanner(true, 'Aap offline hain 
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
 }
+
+
+/* ============ AUTO EMPLOYEE CODE ============ */
+function ocPad(n,len){ var s=String(n); while(s.length<len){ s='0'+s; } return s; }
+function ocParseCode(v){
+  v = String(v==null?'':v).trim();
+  if(v.length<2 || v.length>14) return null;
+  var i=0;
+  while(i<v.length){ var c=v.charCodeAt(i); if(c>=48 && c<=57) break; i++; }
+  if(i===0 || i===v.length) return null;
+  var p=v.slice(0,i), d=v.slice(i);
+  var pu=p.toUpperCase();
+  for(var k=0;k<pu.length;k++){ var a=pu.charCodeAt(k); if(a<65 || a>90) return null; }
+  for(var j=0;j<d.length;j++){ var b=d.charCodeAt(j); if(b<48 || b>57) return null; }
+  return { p:pu, n:parseInt(d,10), pad:d.length };
+}
+function ocUserCode(u){
+  var val='';
+  Object.keys(u).forEach(function(k){ if(!val && String(k).toLowerCase().indexOf('code')>=0){ val=String(u[k]==null?'':u[k]).trim(); } });
+  return val;
+}
+function ocCodeInfo(){
+  var users = (typeof S==='object' && S && S.cache && S.cache.users) ? S.cache.users : [];
+  var best=null, used={};
+  users.forEach(function(u){
+    var val=ocUserCode(u);
+    var m=ocParseCode(val);
+    if(m){ used[val.toUpperCase()]=1; if(!best || m.n>best.n) best=m; }
+  });
+  if(!best) best={ p:'OC', n:0, pad:3 };
+  return { prefix:best.p, pad:best.pad, max:best.n, used:used };
+}
+function ocNextCode(extraUsed){
+  var info=ocCodeInfo();
+  var used=info.used;
+  if(extraUsed){ extraUsed.forEach(function(c){ if(c) used[String(c).toUpperCase()]=1; }); }
+  var n=info.max+1;
+  var code=info.prefix+ocPad(n,info.pad);
+  var guard=0;
+  while(used[code.toUpperCase()] && guard<5000){ n++; code=info.prefix+ocPad(n,info.pad); guard++; }
+  return code;
+}
+function ocAssignCodes(rows){
+  var used=[];
+  rows.forEach(function(r){ if(r.code) used.push(r.code); });
+  rows.forEach(function(r){
+    if(!r.code){ var c=ocNextCode(used); r.code=c; r.autoCode=true; used.push(c); }
+  });
+}
+(function(){
+  if(typeof userModal!=='function') return;
+  var OM=userModal;
+  window.userModal=function(){
+    var out=OM.apply(null, arguments);
+    try{
+      var el=document.getElementById('uCode');
+      if(el && !String(el.value||'').trim()){
+        el.value=ocNextCode();
+        el.title='Auto-generated code - zaroorat ho to badal sakte hain';
+      }
+    }catch(e){}
+    return out;
+  };
+})();
 
 </script>
 </body>
