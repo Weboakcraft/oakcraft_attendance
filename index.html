@@ -807,7 +807,8 @@ async function renderUsers(){
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Employees</h2><div class="sub">User master — ${d.users.length} employees (${d.users.filter(u=>String(u.status).toLowerCase()==='active').length} active)</div></div>
   <div class="top-actions"><input class="searchbox" placeholder="🔍 Search…" oninput="drawUsers(this.value)">
-  <button class="btn btn-gold" onclick="userModal()">+ Add Employee</button></div></div>
+  <button class="btn btn-gold" onclick="userModal()">+ Add Employee</button>
+  <button class="btn btn-o" onclick="importModal()">Bulk Import (Excel)</button></div></div>
   ${reqBanner}
   <div class="tbl-wrap"><table id="usersTable"></table></div>`;
   drawUsers('');
@@ -842,6 +843,110 @@ function userModal(u){
   <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
   <button class="btn btn-p" onclick="saveUser(this)">Save</button></div>`);
 }
+
+/* ================= BULK IMPORT (Excel / CSV) ================= */
+var IMP_ROWS = [];
+var IMP_COLS = ['Employee Name','Useremail','Employee Code','Timing','Employee Type','Status','Role','Department','Designation','Basic Salary','Week Off Day'];
+function impNorm(s){ var o=''; s=String(s).toLowerCase(); for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); if(c>=97&&c<=122) o+=s.charAt(i); } return o; }
+function impPick(obj, keys){ for(var k in obj){ if(keys.indexOf(impNorm(k))>=0){ var val=obj[k]; if(val===null||val===undefined) return ''; return String(val).trim(); } } return ''; }
+function impMap(o){
+  return {
+    name: impPick(o,['employeename','name','fullname','empname']),
+    email: impPick(o,['useremail','email','emailid','mail','gmail']).toLowerCase(),
+    code: impPick(o,['employeecode','code','empcode','empid','employeeid']),
+    timing: impPick(o,['timing','shift','shifttiming','intime']) || '09:30',
+    type: impPick(o,['employeetype','type']) || 'Staff',
+    status: impPick(o,['status']) || 'Active',
+    role: impPick(o,['role']) || 'Employee',
+    department: impPick(o,['department','dept']),
+    designation: impPick(o,['designation','title','post']),
+    basicSalary: impPick(o,['basicsalary','salary','basic','ctc']) || '0',
+    weekOffDay: impPick(o,['weekoffday','weekoff','offday','off']) || 'Sunday'
+  };
+}
+function impValid(r){
+  var e=[];
+  if(!r.name) e.push('Name missing');
+  var at=r.email.indexOf('@');
+  if(at<1 || r.email.indexOf('.',at) < at+2) e.push('Email invalid');
+  if(!r.code) e.push('Code missing');
+  return e;
+}
+function importModal(){
+  IMP_ROWS=[];
+  modal('<h3>Bulk Import Employees</h3>'
+   +'<p class="msub">Excel (.xlsx / .xls) ya CSV file upload karein. Pehli row me column headers honi chahiye.</p>'
+   +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Sample CSV template download karein</a></div>'
+   +'<label>Choose file</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv" onchange="impRead(this)">'
+   +'<div id="impPrev" style="margin-top:14px"></div>'
+   +'<div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn btn-gold" id="impGo" disabled onclick="impRun()">Import</button></div>');
+}
+function impTemplate(){
+  var nl=String.fromCharCode(10);
+  var csv=IMP_COLS.join(',')+nl+'Ravi Kumar,ravi@oakcraft.in,OC010,09:30,Staff,Active,Employee,Sales,Executive,20000,Sunday'+nl;
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='employee_import_template.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function impLib(){
+  return new Promise(function(res,rej){
+    if(window.XLSX) return res();
+    var s=document.createElement('script');
+    s.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload=function(){ res(); };
+    s.onerror=function(){ rej(new Error('Excel library load nahi ho payi. Internet check karein ya CSV file use karein.')); };
+    document.head.appendChild(s);
+  });
+}
+async function impRead(input){
+  var f=input.files&&input.files[0]; if(!f) return;
+  var prev=$('#impPrev'); prev.innerHTML='<span class="msub">Reading file...</span>';
+  try{
+    await impLib();
+    var buf=await f.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array'});
+    var raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:'',raw:false});
+    IMP_ROWS=raw.map(impMap).filter(function(r){ return r.name||r.email||r.code; });
+    impPreview();
+  }catch(err){ prev.innerHTML='<span style="color:var(--crit)">'+esc(err.message)+'</span>'; }
+}
+function impPreview(){
+  var prev=$('#impPrev'), go=$('#impGo');
+  if(!IMP_ROWS.length){ prev.innerHTML='<span style="color:var(--crit)">File me koi row nahi mili.</span>'; go.disabled=true; return; }
+  var existing=((S.cache&&S.cache.users)||[]).map(function(u){ return Object.keys(u).map(function(k){ return String(u[k]); }).join('|').toLowerCase(); });
+  var seen=[], ok=0, bad=0;
+  var html='<div class="tbl-wrap" style="max-height:240px;overflow:auto"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Code</th><th>Status</th></tr></thead><tbody>';
+  IMP_ROWS.forEach(function(r,i){
+    var e=impValid(r);
+    if(r.email && seen.indexOf(r.email)>=0) e.push('File me duplicate');
+    seen.push(r.email);
+    var dup = r.email && existing.some(function(s){ return s.indexOf(r.email)>=0; });
+    if(e.length){ bad++; } else { ok++; }
+    var st = e.length ? '<span class="chip c-absent">'+esc(e.join(', '))+'</span>' : (dup ? '<span class="chip c-late">Update hoga</span>' : '<span class="chip c-present">Naya</span>');
+    html+='<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.code)+'</td><td>'+st+'</td></tr>';
+  });
+  html+='</tbody></table></div><p class="msub" style="margin-top:8px">'+ok+' valid row(s) import hongi, '+bad+' skip.</p>';
+  prev.innerHTML=html;
+  go.disabled = (ok===0);
+}
+async function impRun(){
+  var go=$('#impGo'); go.disabled=true;
+  var list=IMP_ROWS.filter(function(r){ return impValid(r).length===0; });
+  var done=0, fails=[];
+  for(var i=0;i<list.length;i++){
+    go.textContent='Importing '+(i+1)+' / '+list.length+'...';
+    try{ await api('saveUser', list[i]); done++; }
+    catch(err){ fails.push(list[i].email+' - '+err.message); }
+  }
+  closeModal();
+  toast(done+' employee(s) import ho gaye'+(fails.length?', '+fails.length+' fail':''), fails.length?'':'ok');
+  await renderUsers();
+  if(fails.length){
+    modal('<h3>Import Report</h3><p class="msub">'+done+' successful, '+fails.length+' failed</p><div style="font-size:12.5px;line-height:1.8;color:var(--crit)">'+fails.map(esc).join('<br>')+'</div><div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Close</button></div>');
+  }
+}
+
 async function saveUser(btn){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   try{
