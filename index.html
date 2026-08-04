@@ -294,9 +294,9 @@ async function apiSend(action, payload, tok){
 }
 async function api(action, payload={}, opts={}){
   let j = await apiSend(action, payload, S.token);
-  /* Google ka ID token sirf ~1 ghante valid rehta hai. Expire hone par user ko
-     login screen par wapas phenkne ke bajaye chupchap naya token lete hain aur
-     wahi request dobara bhej dete hain - user ko dobara sign in nahi karna padta. */
+  /* A Google ID token is only valid for ~1 hour. When it expires we do not throw
+     the user back to the login screen: we quietly fetch a fresh token and send
+     the very same request again, so the user never has to sign in twice. */
   if(!j.ok && String(j.error).indexOf('AUTH:')===0 && !opts.noRenew){
     try{ await ocRenewToken(); j = await apiSend(action, payload, S.token); }catch(e){}
   }
@@ -308,13 +308,13 @@ async function api(action, payload={}, opts={}){
 }
 
 /* ================= AUTH / SESSION =================
-   Rule: user ek hi baar sign in kare. Dobara Google prompt SIRF tab aaye jab
-     (a) user khud Logout kare, ya
-     (b) Google session hi khatam ho jaye aur silent renew fail ho jaye.
-   ID token ko "session" ki tarah treat nahi karte - wo short-lived proof hai,
-   isliye zarurat par background me silently refresh kar lete hain. */
+   Rule: the user signs in ONCE. Google is asked again ONLY when
+     (a) the user logs out themselves, or
+     (b) the Google session itself has ended and a silent renew fails.
+   The ID token is not treated as the session - it is only short-lived proof,
+   so it is refreshed silently in the background whenever needed. */
 var OC_TOK_KEY='oc_tok', OC_HINT_KEY='oc_hint';
-var OC_PERSIST_ALL_ROLES = true; /* false = Admin/HR ko har browser session me dobara login karna padega */
+var OC_PERSIST_ALL_ROLES = true; /* false = Admin/HR must sign in again in every browser session */
 var ocGsiInit=false, ocRenewJob=null, ocRenewTimer=null;
 
 function ocJwt(tok){ try{ return JSON.parse(atob(String(tok).split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return null; } }
@@ -335,7 +335,7 @@ function ocApplyRoleStorage(role){
   if(S.token){ ocSaveToken(S.token, OC_PERSIST_ALL_ROLES ? true : !priv); }
 }
 
-/* ---- Google Identity: initialize sirf ek baar, button jab chahiye tab render ---- */
+/* ---- Google Identity: initialize once, render the button whenever needed ---- */
 function ocGsiLoaded(){ return !!(window.google && google.accounts && google.accounts.id); }
 function initGSI(){
   if(!ocGsiLoaded()) return false;
@@ -353,11 +353,11 @@ function ocWhenGsi(){
     if(ocGsiLoaded()) return res();
     var n=0, iv=setInterval(function(){
       if(ocGsiLoaded()){ clearInterval(iv); res(); }
-      else if(++n>80){ clearInterval(iv); rej(new Error('Google sign-in load nahi ho paya')); }
+      else if(++n>80){ clearInterval(iv); rej(new Error('Google sign-in failed to load')); }
     },120);
   });
 }
-/* Silent renew - naya ID token bina kisi click ke (One Tap auto re-authenticate) */
+/* Silent renew - a fresh ID token without any click (One Tap auto re-authenticate) */
 function ocRenewToken(){
   if(ocRenewJob) return ocRenewJob.promise;
   var job={};
@@ -373,7 +373,7 @@ function ocRenewToken(){
 function ocScheduleRenew(){
   if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
   var p=ocJwt(S.token); if(!p || !p.exp) return;
-  var ms = p.exp*1000 - Date.now() - 5*60*1000; /* expiry se 5 min pehle refresh */
+  var ms = p.exp*1000 - Date.now() - 5*60*1000; /* refresh 5 min before expiry */
   ocRenewTimer = setTimeout(function(){ ocRenewToken().catch(function(){}); }, Math.max(20000, Math.min(ms, 2000000000)));
 }
 function onCred(resp){
@@ -382,10 +382,10 @@ function onCred(resp){
   ocSaveToken(S.token, true);
   ocScheduleRenew();
   var job = ocRenewJob;
-  if(job){ ocRenewJob=null; clearTimeout(job.timer); job.resolve(S.token); return; } /* renew tha - screen jahan hai wahin rehne do */
+  if(job){ ocRenewJob=null; clearTimeout(job.timer); job.resolve(S.token); return; } /* this was a renew - keep the user on the current screen */
   boot();
 }
-/* ---- login screen sirf logout ya asli session-expiry par ---- */
+/* ---- login screen only on logout or a genuine session expiry ---- */
 function ocShowLogin(msg){
   $('#app').style.display='none';
   $('#loginScreen').style.display='flex';
@@ -395,13 +395,13 @@ function ocShowLogin(msg){
 }
 function ocResuming(){
   var g=$('#gbtn');
-  if(g){ g.innerHTML='<div style="display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.65);font-size:13px"><span class="spin"></span> Session resume ho raha hai...</div>'; }
+  if(g){ g.innerHTML='<div style="display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.65);font-size:13px"><span class="spin"></span> Resuming your session…</div>'; }
 }
 function ocSessionEnded(err){
   ocClearToken(); S.token=null;
   if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
   var m=String(err||'').replace('AUTH:','').trim();
-  ocShowLogin(m || 'Session expire ho gaya - dobara sign in karein.');
+  ocShowLogin(m || 'Your session has expired — please sign in again.');
 }
 window.addEventListener('load', () => {
   if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
@@ -410,19 +410,19 @@ window.addEventListener('load', () => {
   }
   var saved = ocGetToken();
   if(saved && ocTokenAlive(saved, 60000)){
-    S.token = saved; ocScheduleRenew(); boot();          /* token valid hai - seedha app, koi Google UI nahi */
+    S.token = saved; ocScheduleRenew(); boot();          /* token still valid - straight into the app, no Google UI */
   } else if(saved || ocHint()){
-    ocResuming();                                        /* pehle login ho chuka hai - chupchap naya token */
-    ocRenewToken().then(function(){ boot(); }, function(){ ocShowLogin('Session expire ho gaya - dobara sign in karein.'); });
+    ocResuming();                                        /* signed in before - fetch a new token silently */
+    ocRenewToken().then(function(){ boot(); }, function(){ ocShowLogin('Your session has expired — please sign in again.'); });
   } else {
-    ocWhenGsi().then(function(){ initGSI(); }, function(){});  /* pehli baar - normal sign-in button */
+    ocWhenGsi().then(function(){ initGSI(); }, function(){});  /* first visit - show the normal sign-in button */
   }
 });
-/* dusre tab me token refresh hua to yahan bhi use kar lo */
+/* another tab refreshed the token - use it here as well */
 window.addEventListener('storage', function(e){
   if(e.key===OC_TOK_KEY && e.newValue){ S.token=e.newValue; ocScheduleRenew(); }
 });
-/* tab background me tha aur token beech me expire ho gaya - wapas aate hi silent refresh */
+/* tab was in the background and the token expired - refresh silently on return */
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState==='visible' && S.token && !ocTokenAlive(S.token, 60000)){ ocRenewToken().catch(function(){}); }
 });
@@ -430,7 +430,7 @@ function logout(){
   ocClearToken();
   try{ localStorage.removeItem(OC_HINT_KEY); }catch(e){}
   if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
-  try{ ocTrim(); }catch(e){}                /* cached screens bhi hata do */
+  try{ ocTrim(); }catch(e){}                /* drop the cached screens too */
   try{ google.accounts.id.disableAutoSelect(); }catch(e){}
   location.reload();
 }
@@ -452,6 +452,7 @@ async function boot(){
     if(window.google?.accounts?.id) initGSI();
     $('#loginErr').style.display='block';
     const msg = err.message||'Login failed';
+    /* NOTE: the Apps Script backend may still reply in Hinglish, so both are matched */
     if(/register nahi|access nahi|not registered|no access/i.test(msg)){
       $('#loginErr').innerHTML = esc(msg) +
         `<div style="margin-top:12px;text-align:left"><input id="reqPhone" placeholder="Phone (optional)" style="margin-bottom:8px">
@@ -525,7 +526,7 @@ function tipShow(e, text){ const t=$('#barTip'); t.textContent=text; t.style.dis
 function tipHide(){ $('#barTip').style.display='none'; }
 
 function hoursBarChart(trend, fullDay){
-  // employee ke daily hours — bars, full-day threshold line
+  // employee's daily hours — bars with a full-day threshold line
   const data = trend.filter(t=>['Present','Working','Half Day','Absent'].includes(t.status)||t.hours>0);
   if(!data.length) return '<div class="empty">No data yet</div>';
   const W=Math.max(320, data.length*26), H=150, pad=6, maxH=Math.max(10, fullDay+2, ...data.map(d=>d.hours));
@@ -625,7 +626,7 @@ async function renderDashboard(){
   } else {
     html += `<div class="grid g4" style="margin-bottom:16px">
       ${tile('Present', my.present, MONTH_NAME(S.month), 'var(--good)')}
-      ${tile('Half Days', my.halfDay, my.late+' din late', 'var(--warn)')}
+      ${tile('Half Days', my.halfDay, my.late+' days late', 'var(--warn)')}
       ${tile('Absent', my.absent, (d.myPendingLeaves||0)+' leave pending', 'var(--crit)')}
       ${tile('Total Hours', hrs, 'this month', 'var(--blue)')}
     </div>
@@ -677,12 +678,12 @@ async function renderPunch(){
       </div>
       <div class="cam-bar">
         <button class="btn btn-gold" id="camStartBtn" onclick="startCam()">📷 Camera On</button>
-        <button class="btn btn-p" id="camSnapBtn" onclick="snap()" style="display:none">📸 Selfie lo</button>
+        <button class="btn btn-p" id="camSnapBtn" onclick="snap()" style="display:none">📸 Take Selfie</button>
         <button class="btn btn-o" id="camRetakeBtn" onclick="retake()" style="display:none">↺ Retake</button>
       </div>
     </div>` : '';
   $('#main').innerHTML = `
-  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Selfie + live location ke saath punch (Staff rule)':'Ek button — live location auto-capture (Labour rule)'}</div></div></div>
+  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Punch with a selfie + live location (Staff rule)':'One button — live location captured automatically (Labour rule)'}</div></div></div>
   <div class="punch-wrap" ${staff?'':'style="grid-template-columns:1fr;max-width:520px"'}>
     ${camCard}
     <div>
@@ -693,9 +694,9 @@ async function renderPunch(){
         <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
         <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
           ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
-        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'First take a selfie and let GPS lock':'Let GPS lock…'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Take a selfie and wait for GPS lock':'Waiting for GPS lock…'}</div>
       </div>
-      <div class="card" style="margin-top:16px"><h3>Aaj ke punches</h3>
+      <div class="card" style="margin-top:16px"><h3>Today's punches</h3>
         <div class="timeline" id="todayPunches">${renderPunchList(t.punches||[])}</div></div>
     </div>
   </div>`;
@@ -759,7 +760,7 @@ function checkReady(){
   const b=$('#punchBtn'); if(!b) return;
   b.disabled=!ok;
   $('#punchHint').textContent = ok ? 'All set — tap to punch ✅'
-    : !cam.pos ? 'GPS lock hone do'
+    : !cam.pos ? 'Waiting for GPS lock…'
     : !zoneOk ? 'Reach the office location to punch'
     : 'Selfie still required';
 }
@@ -813,9 +814,9 @@ async function renderReports(){
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Reports</h2><div class="sub">Daily attendance summary — computed live, never stale</div></div>
   <div class="top-actions">
-    ${isHR?`<select class="searchbox" id="repEmp" onchange="repFilter.emp=this.value;drawReports()"><option value="">Saare employees</option>${emps.map(e=>`<option ${repFilter.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select>`:''}
+    ${isHR?`<select class="searchbox" id="repEmp" onchange="repFilter.emp=this.value;drawReports()"><option value="">All employees</option>${emps.map(e=>`<option ${repFilter.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select>`:''}
     <select class="searchbox" style="max-width:150px" id="repSt" onchange="repFilter.status=this.value;drawReports()">
-      <option value="">Saare status</option>${['Present','Half Day','Absent','Paid Leave','Week Off','Festival Holiday'].map(s=>`<option ${repFilter.status===s?'selected':''}>${s}</option>`).join('')}</select>
+      <option value="">All statuses</option>${['Present','Half Day','Absent','Paid Leave','Week Off','Festival Holiday'].map(s=>`<option ${repFilter.status===s?'selected':''}>${s}</option>`).join('')}</select>
     ${monthPicker('renderReports()')}
     <div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">☰ Table</button>
     <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">▦ Calendar</button></div>
@@ -946,7 +947,7 @@ function drawUsers(q){
 function userModal(u){
   const isAdmin=S.profile.role==='Admin';
   u=u||{};
-  modal(`<h3>${u.email?'Edit':'Add'} Employee</h3><div class="msub">Useremail unique hona chahiye — yahi primary key hai (SOP 8)</div>
+  modal(`<h3>${u.email?'Edit':'Add'} Employee</h3><div class="msub">User email must be unique — it is the primary key (SOP 8)</div>
   <div class="grid g2"><div><label>Full Name *</label><input id="uName" value="${esc(u.name||'')}"></div>
   <div><label>Employee Code *</label><input id="uCode" value="${esc(u.code||'')}"></div></div>
   <label>Google Email * ${u.email?'(do not change — history will break)':''}</label><input id="uEmail" value="${esc(u.email||'')}" ${u.email?'readonly style="opacity:.6"':''} placeholder="name@oakcraft.in">
@@ -992,8 +993,8 @@ function impValid(r){
 function importModal(){
   IMP_ROWS=[];
   modal('<h3>Bulk Import Employees</h3>'
-   +'<p class="msub">Excel (.xlsx / .xls) ya CSV file upload karein. Pehli row me column headers honi chahiye. Employee Code khaali chhod dein to automatically next code lag jayega.</p>'
-   +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Sample CSV template download karein</a></div>'
+   +'<p class="msub">Upload an Excel (.xlsx / .xls) or CSV file. The first row must contain the column headers. Leave Employee Code blank and the next code will be assigned automatically.</p>'
+   +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Download sample CSV template</a></div>'
    +'<label>Choose file</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv" onchange="impRead(this)">'
    +'<div id="impPrev" style="margin-top:14px"></div>'
    +'<div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn btn-gold" id="impGo" disabled onclick="impRun()">Import</button></div>');
@@ -1012,7 +1013,7 @@ function impLib(){
     var s=document.createElement('script');
     s.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
     s.onload=function(){ res(); };
-    s.onerror=function(){ rej(new Error('Excel library load nahi ho payi. Internet check karein ya CSV file use karein.')); };
+    s.onerror=function(){ rej(new Error('Could not load the Excel library. Check your internet connection or use a CSV file.')); };
     document.head.appendChild(s);
   });
 }
@@ -1030,21 +1031,21 @@ async function impRead(input){
 }
 function impPreview(){
   var prev=$('#impPrev'), go=$('#impGo');
-  if(!IMP_ROWS.length){ prev.innerHTML='<span style="color:var(--crit)">File me koi row nahi mili.</span>'; go.disabled=true; return; }
+  if(!IMP_ROWS.length){ prev.innerHTML='<span style="color:var(--crit)">No rows found in the file.</span>'; go.disabled=true; return; }
   var existing=((S.cache&&S.cache.users)||[]).map(function(u){ return Object.keys(u).map(function(k){ return String(u[k]); }).join('|').toLowerCase(); });
   ocAssignCodes(IMP_ROWS);
   var seen=[], ok=0, bad=0;
   var html='<div class="tbl-wrap" style="max-height:240px;overflow:auto"><table><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Code</th><th>Status</th></tr></thead><tbody>';
   IMP_ROWS.forEach(function(r,i){
     var e=impValid(r);
-    if(r.email && seen.indexOf(r.email)>=0) e.push('File me duplicate');
+    if(r.email && seen.indexOf(r.email)>=0) e.push('Duplicate in file');
     seen.push(r.email);
     var dup = r.email && existing.some(function(s){ return s.indexOf(r.email)>=0; });
     if(e.length){ bad++; } else { ok++; }
-    var st = e.length ? '<span class="chip c-absent">'+esc(e.join(', '))+'</span>' : (dup ? '<span class="chip c-late">Update hoga</span>' : '<span class="chip c-present">Naya</span>');
+    var st = e.length ? '<span class="chip c-absent">'+esc(e.join(', '))+'</span>' : (dup ? '<span class="chip c-late">Will update</span>' : '<span class="chip c-present">New</span>');
     html+='<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.code)+(r.autoCode?' <span class="msub" style="font-size:11px">(auto)</span>':'')+'</td><td>'+st+'</td></tr>';
   });
-  html+='</tbody></table></div><p class="msub" style="margin-top:8px">'+ok+' valid row(s) import hongi, '+bad+' skip.</p>';
+  html+='</tbody></table></div><p class="msub" style="margin-top:8px">'+ok+' valid row(s) will be imported, '+bad+' skipped.</p>';
   prev.innerHTML=html;
   go.disabled = (ok===0);
 }
@@ -1058,7 +1059,7 @@ async function impRun(){
     catch(err){ fails.push(list[i].email+' - '+err.message); }
   }
   closeModal();
-  toast(done+' employee(s) import ho gaye'+(fails.length?', '+fails.length+' fail':''), fails.length?'':'ok');
+  toast(done+' employee(s) imported'+(fails.length?', '+fails.length+' fail':''), fails.length?'':'ok');
   await renderUsers();
   if(fails.length){
     modal('<h3>Import Report</h3><p class="msub">'+done+' successful, '+fails.length+' failed</p><div style="font-size:12.5px;line-height:1.8;color:var(--crit)">'+fails.map(esc).join('<br>')+'</div><div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Close</button></div>');
@@ -1082,7 +1083,7 @@ async function renderPayout(){
   S.cache.payout=d;
   const total=d.rows.reduce((a,r)=>a+r.net,0);
   $('#main').innerHTML=`
-  <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (live AppSheet jaisa)'}</div></div>
+  <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (same as live AppSheet)'}</div></div>
   <div class="top-actions">${monthPicker('renderPayout()')}<button class="btn btn-o" onclick="exportPayoutCSV()">⬇ CSV</button></div></div>
   <div class="grid g3" style="margin-bottom:16px">
     ${tile('Total Payable', INR(total), d.rows.length+' employees','var(--good)')}
@@ -1171,15 +1172,15 @@ async function renderSettings(){
   <div class="topbar"><div><h2>Settings</h2><div class="sub">System rules — only Admin can edit</div></div></div>
   <div class="grid g2" style="align-items:start">
     <div class="card"><h3>Attendance Rules</h3>
-      ${F('full_day_hours','Full day hours','itne ghante = Present')}
-      ${F('half_day_hours','Half day hours','isse kam = short')}
+      ${F('full_day_hours','Full day hours','this many hours = Present')}
+      ${F('half_day_hours','Half day hours','less than this = short day')}
       ${F('grace_minutes','Grace minutes','not marked late until this long after shift')}
       <label>Per-day rate basis</label>
-      <select data-k="per_day_rate_basis"><option value="total_days" ${s.per_day_rate_basis==='total_days'?'selected':''}>Calendar days (live AppSheet jaisa)</option>
+      <select data-k="per_day_rate_basis"><option value="total_days" ${s.per_day_rate_basis==='total_days'?'selected':''}>Calendar days (same as live AppSheet)</option>
       <option value="working_days" ${s.per_day_rate_basis==='working_days'?'selected':''}>Working days (SOP 12.1)</option></select>
       ${F('allowed_late_count','Free late days / month','deduction after this')}
       ${F('late_deduction_per_late','Late deduction (₹ per late)','per chargeable late')}
-      <label>Email notifications <span style="font-weight:400;color:var(--muted)">— leave apply/approve + final payout par mail</span></label>
+      <label>Email notifications <span style="font-weight:400;color:var(--muted)">— email on leave apply / approve + final payout</span></label>
       <select data-k="email_notifications"><option value="yes" ${String(s.email_notifications).toLowerCase()!=='no'?'selected':''}>Yes</option><option value="no" ${String(s.email_notifications).toLowerCase()==='no'?'selected':''}>No</option></select>
       <h3 style="margin-top:22px">Geo-fence (optional)</h3>
       ${F('geofence_lat','Office Latitude','blank = off','text')}
@@ -1230,10 +1231,10 @@ function ocSet(k,d){ try{ localStorage.setItem(k, JSON.stringify({t:Date.now(), 
 function ocTrim(){ try{ Object.keys(localStorage).forEach(function(k){ if(k.indexOf('occ:')===0) localStorage.removeItem(k); }); }catch(e){} }
 function ocAge(t){
   var m=Math.round((Date.now()-t)/60000);
-  if(m<1) return 'abhi ka';
-  if(m<60) return m+' min purana';
-  var h=Math.round(m/60); if(h<24) return h+' ghante purana';
-  return Math.round(h/24)+' din purana';
+  if(m<1) return 'just now';
+  if(m<60) return m+' min ago';
+  var h=Math.round(m/60); if(h<24) return h+' hours ago';
+  return Math.round(h/24)+' days ago';
 }
 function ocBanner(show,msg){
   var el=document.getElementById('ocOffBar');
@@ -1255,14 +1256,14 @@ function ocRerender(){
     var isRead = OC_READS.indexOf(action) >= 0;
     var offline = (navigator.onLine === false);
     if(!isRead){
-      if(offline) return Promise.reject(new Error('Aap offline hain. Ye action internet ke bina nahi ho sakta.'));
+      if(offline) return Promise.reject(new Error('You are offline. This action needs an internet connection.'));
       return ORIG(action, payload, opts);
     }
     var key = ocKey(action, payload);
     var cached = ocGet(key);
     if(offline){
-      if(cached){ ocBanner(true, 'Offline - ' + ocAge(cached.t) + ' data dikha rahe hain'); return Promise.resolve(cached.d); }
-      return Promise.reject(new Error('Aap offline hain aur is screen ka saved data maujood nahi hai.'));
+      if(cached){ ocBanner(true, 'Offline — showing data from ' + ocAge(cached.t)); return Promise.resolve(cached.d); }
+      return Promise.reject(new Error('You are offline and no saved data is available for this screen.'));
     }
     var net = OC_INFLIGHT[key];
     if(!net){
@@ -1280,14 +1281,14 @@ function ocRerender(){
       OC_INFLIGHT[key] = net;
     }
     if(cached){
-      net.catch(function(){ ocBanner(true, 'Server se connect nahi ho pa raha - ' + ocAge(cached.t) + ' data dikha rahe hain'); });
+      net.catch(function(){ ocBanner(true, 'Cannot reach the server — showing data from ' + ocAge(cached.t)); });
       return Promise.resolve(cached.d);
     }
     return net;
   };
 })();
 window.addEventListener('online', function(){ ocBanner(false); ocRerender(); });
-window.addEventListener('offline', function(){ ocBanner(true, 'Aap offline hain - saved data dikh raha hai'); });
+window.addEventListener('offline', function(){ ocBanner(true, 'You are offline — showing saved data'); });
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
 }
@@ -1349,7 +1350,7 @@ function ocAssignCodes(rows){
       var el=document.getElementById('uCode');
       if(el && !String(el.value||'').trim()){
         el.value=ocNextCode();
-        el.title='Auto-generated code - zaroorat ho to badal sakte hain';
+        el.title='Auto-generated code — change it if you need to';
       }
     }catch(e){}
     return out;
@@ -1357,7 +1358,7 @@ function ocAssignCodes(rows){
 })();
 
 
-/* ====== MODAL: bahar click karne par form band na ho ====== */
+/* ====== MODAL: clicking outside must not close the form ====== */
 (function(){
   var st=document.createElement('style');
   st.textContent='@keyframes ocShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}.oc-shake{animation:ocShake .3s ease}';
