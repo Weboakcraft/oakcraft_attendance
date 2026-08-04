@@ -278,7 +278,65 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const INITIALS = n => String(n||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 const MONTH_NAME = m => new Date(m+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
-const fmtT = t => { if(!t) return '—'; const [h,mi]=t.split(':').map(Number); const ap=h>=12?'PM':'AM'; return `${((h+11)%12)+1}:${String(mi).padStart(2,'0')} ${ap}`; };
+/* ---------- Time helpers ----------
+   Values coming from the Sheets / Apps Script backend can arrive in several
+   shapes: a plain "HH:MM" string, "HH:MM:SS", "9:30 AM", an ISO date-time, a
+   legacy spreadsheet date-time such as "Sat Dec 30 1899 09:30:00 GMT+0530", a
+   real Date object, or a day-fraction number. ocParseHM() normalises all of
+   them to [hours, minutes] so shift and punch times never render as
+   "NaN:30 AM" any more. */
+function ocParseHM(v){
+  if(v === null || v === undefined || v === '') return null;
+  if(v instanceof Date) return isNaN(v.getTime()) ? null : [v.getHours(), v.getMinutes()];
+  if(typeof v === 'number'){
+    /* Day fraction, e.g. 0.395833 = 09:30. */
+    if(v > 0 && v < 1){ var tm = Math.round(v * 1440); return [Math.floor(tm / 60) % 24, tm % 60]; }
+    /* Decimal hours, e.g. 9.5 = 09:30. */
+    if(v >= 1 && v <= 24){ var wh = Math.floor(v); return [wh % 24, Math.round((v - wh) * 60) % 60]; }
+    var dn = new Date(v); return isNaN(dn.getTime()) ? null : [dn.getHours(), dn.getMinutes()];
+  }
+  var s = String(v).trim();
+  if(!s) return null;
+  /* Plain clock time, with or without seconds and AM/PM. */
+  var pt = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/);
+  if(pt){
+    var ph = Number(pt[1]), pm = Number(pt[2]);
+    if(pt[3]){ var isPm = /^[Pp]/.test(pt[3]); if(isPm && ph < 12) ph += 12; if(!isPm && ph === 12) ph = 0; }
+    if(ph <= 23 && pm <= 59) return [ph % 24, pm];
+  }
+  /* Legacy spreadsheet date-time: keep the literal clock time, never shift the time zone. */
+  var lg = s.match(/^[A-Za-z]{3}\s+[A-Za-z]{3}\s+\d{1,2}\s+\d{4}\s+(\d{1,2}):(\d{2})/);
+  if(lg) return [Number(lg[1]) % 24, Number(lg[2])];
+  /* ISO date-time: let Date deal with the UTC offset. */
+  if(/^\d{4}-\d{2}-\d{2}[T\s]\d{1,2}:\d{2}/.test(s)){
+    var di = new Date(s);
+    if(!isNaN(di.getTime())){
+      /* Time-only cells are stored on a 1899/1900 date where historical local
+         offsets are unreliable, so apply the current offset instead. */
+      if(Number(s.slice(0, 4)) < 1970 && /(Z|[+-]\d{2}:?\d{2})$/.test(s)){
+        var mins = di.getUTCHours() * 60 + di.getUTCMinutes() - new Date().getTimezoneOffset();
+        mins = ((mins % 1440) + 1440) % 1440;
+        return [Math.floor(mins / 60), mins % 60];
+      }
+      return [di.getHours(), di.getMinutes()];
+    }
+  }
+  /* Last resort: the first clock time found anywhere in the string. */
+  var any = s.match(/(\d{1,2}):(\d{2})/);
+  if(any){
+    var ah = Number(any[1]), am = Number(any[2]);
+    if(/[Pp][Mm]/.test(s) && ah < 12) ah += 12;
+    if(/[Aa][Mm]/.test(s) && ah === 12) ah = 0;
+    if(ah <= 23 && am <= 59) return [ah, am];
+  }
+  return null;
+}
+/* "9:30 AM" - for display in tables, timelines and toasts. */
+const fmtT = t => { const hm = ocParseHM(t); if(!hm) return '—'; const ap = hm[0] >= 12 ? 'PM' : 'AM'; return `${((hm[0] + 11) % 12) + 1}:${String(hm[1]).padStart(2, '0')} ${ap}`; };
+/* "09:30" - for <input type="time"> values. */
+const fmtT24 = t => { const hm = ocParseHM(t); return hm ? `${String(hm[0]).padStart(2, '0')}:${String(hm[1]).padStart(2, '0')}` : ''; };
+/* "9:30 AM" or an empty string - for CSV exports, where a dash looks odd. */
+const fmtTx = t => { const hm = ocParseHM(t); return hm ? fmtT(t) : ''; };
 const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
 const fmtDW = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
 const INR = n => '₹' + Number(n||0).toLocaleString('en-IN');
@@ -862,7 +920,7 @@ function drawReports(){
 function exportReportsCSV(){
   const rows=S.cache.reports||[];
   const head=['Date','Employee','Code','Shift','Punch In','Punch Out','Hours','Status','Late','Leave Type'];
-  const csv=[head.join(',')].concat(rows.map(r=>[r.date,`"${r.name}"`,r.code,r.timing,r.punchIn||'',r.punchOut||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].join(','))).join('\n');
+  const csv=[head.join(',')].concat(rows.map(r=>[r.date,`"${r.name}"`,r.code,fmtTx(r.timing),fmtTx(r.punchIn)||'',fmtTx(r.punchOut)||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].join(','))).join('\n');
   dl(csv,'attendance_report_'+S.month+'.csv');
 }
 function dl(text,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click(); }
@@ -951,7 +1009,7 @@ function userModal(u){
   <div class="grid g2"><div><label>Full Name *</label><input id="uName" value="${esc(u.name||'')}"></div>
   <div><label>Employee Code *</label><input id="uCode" value="${esc(u.code||'')}"></div></div>
   <label>Google Email * ${u.email?'(do not change — history will break)':''}</label><input id="uEmail" value="${esc(u.email||'')}" ${u.email?'readonly style="opacity:.6"':''} placeholder="name@oakcraft.in">
-  <div class="grid g2"><div><label>Shift Start</label><input type="time" id="uTiming" value="${esc((u.timing||'09:30').slice(0,5))}"></div>
+  <div class="grid g2"><div><label>Shift Start</label><input type="time" id="uTiming" value="${esc(fmtT24(u.timing) || '09:30')}"></div>
   <div><label>Week Off Day</label><select id="uWeekOff">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=>`<option ${u.weekOffDay===d?'selected':''}>${d}</option>`).join('')}</select></div></div>
   <div class="grid g2"><div><label>Employee Type <span style="font-weight:400;color:var(--muted)">— Staff = selfie required, Labour = location only</span></label><select id="uType"><option ${u.type==='Staff'?'selected':''}>Staff</option><option ${u.type==='Labour'?'selected':''}>Labour</option><option ${u.type==='Worker'?'selected':''}>Worker</option></select></div>
   <div><label>Role</label><select id="uRole" ${!isAdmin?'disabled':''}>${['Employee','HR','Admin'].map(r=>`<option ${u.role===r?'selected':''}>${r}</option>`).join('')}</select></div></div>
