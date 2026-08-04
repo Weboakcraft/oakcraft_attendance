@@ -500,11 +500,15 @@ async function boot(){
   $('#loginErr').style.display='none';
   $('#gbtn').innerHTML='<div class="spin"></div>';
   try{
-    const d = await api('init', {}, {noRelogin:true});
+    /* One request brings the profile AND the dashboard. The backend costs about
+       1.5 s of fixed overhead per call, so this nearly halves the wait for the
+       first usable screen. */
+    const d = await ocFirstLoad();
     S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes; S.geofence=d.geofence||null; ocApplyRoleStorage(S.profile&&S.profile.role);
     $('#loginScreen').style.display='none';
     $('#app').style.display='block';
     buildNav(); go('dashboard');
+    ocPrefetch();
   }catch(err){
     $('#loginScreen').style.display='flex';
     if(window.google?.accounts?.id) initGSI();
@@ -973,7 +977,8 @@ async function decideLeave(id,decision){
 /* ================= USERS (HR) ================= */
 async function renderUsers(){
   loadingView('Employees…');
-  let d,reqs=[]; try{ d=await api('getUsers'); reqs=(await api('getAccessRequests')).rows||[]; }catch(e){ return errView(e); }
+  /* Both calls go out together, so we wait once instead of twice. */
+  let d,reqs=[]; try{ const [ru,rr]=await Promise.all([api('getUsers'), api('getAccessRequests')]); d=ru; reqs=rr.rows||[]; }catch(e){ return errView(e); }
   S.cache.users=d.users;
   const reqBanner = reqs.length ? `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--gold)">
     <h3>🙋 ${reqs.length} access request${reqs.length>1?'s':''} pending</h3>
@@ -1224,7 +1229,8 @@ function exportPayoutCSV(){
 /* ================= SETTINGS (Admin) ================= */
 async function renderSettings(){
   loadingView('Settings…');
-  let s,h,audit=[]; try{ s=await api('getSettings'); h=(await api('getHolidays')).holidays; audit=(await api('getAudit')).rows||[]; }catch(e){ return errView(e); }
+  /* All three go out together instead of one after the other. */
+  let s,h,audit=[]; try{ const [rs,rh,ra]=await Promise.all([api('getSettings'), api('getHolidays'), api('getAudit')]); s=rs; h=rh.holidays; audit=ra.rows||[]; }catch(e){ return errView(e); }
   const F = (k,label,hint,type='number') => `<label>${label} <span style="font-weight:400;color:var(--muted)">— ${hint}</span></label><input type="${type}" data-k="${k}" value="${esc(s[k]??'')}">`;
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Settings</h2><div class="sub">System rules — only Admin can edit</div></div></div>
@@ -1430,6 +1436,61 @@ function ocAssignCodes(rows){
     if(box){ box.classList.remove('oc-shake'); void box.offsetWidth; box.classList.add('oc-shake'); }
   }, true);
 })();
+
+/* ------------ FEWER ROUND TRIPS ------------
+   Every backend call carries roughly 1.5 s of fixed Apps Script overhead, so the
+   cheapest speed-up is simply to make fewer calls and to make them earlier. */
+
+/* Wakes the backend up while Google Sign-In is still loading. The answer is thrown
+   away - it only removes the cold-start delay from the first real request. */
+try{ fetch(CONFIG.API_URL, {method:'GET', redirect:'follow', cache:'no-store'}).catch(function(){}); }catch(e){}
+
+/* Profile + dashboard in a single request, with a graceful fall back to the old
+   two-call path if the backend does not know this action yet. */
+async function ocFirstLoad(){
+  try{
+    var d = await api('bootstrap', {month:S.month}, {noRelogin:true});
+    if(d && d.init){
+      ocSet(ocKey('init', {}), d.init);
+      if(d.dashboard){ ocSet(ocKey('getDashboard', {month:S.month}), d.dashboard); }
+      return d.init;
+    }
+  }catch(e){
+    if(navigator.onLine === false){ var c = ocGet(ocKey('init', {})); if(c) return c.d; }
+  }
+  return await api('init', {}, {noRelogin:true});
+}
+
+/* Once the dashboard is on screen, warm the remaining screens in ONE request so
+   switching tabs feels instant. Any failure here is silent on purpose. */
+function ocPrefetch(){
+  if(navigator.onLine === false) return;
+  var role = (S.profile && S.profile.role) || 'Employee';
+  var isHR = ['Admin', 'HR'].indexOf(role) >= 0;
+  var want = [
+    {key:'getReports',  action:'getReports',  payload:{month:S.month}},
+    {key:'getLeaves',   action:'getLeaves',   payload:{}},
+    {key:'getHolidays', action:'getHolidays', payload:{}}
+  ];
+  if(isHR){
+    want.push({key:'getUsers',          action:'getUsers',          payload:{}});
+    want.push({key:'getPayout',         action:'getPayout',         payload:{month:S.month}});
+    want.push({key:'getAccessRequests', action:'getAccessRequests', payload:{}});
+  }
+  if(role === 'Admin'){
+    want.push({key:'getSettings', action:'getSettings', payload:{}});
+    want.push({key:'getAudit',    action:'getAudit',    payload:{}});
+  }
+  setTimeout(function(){
+    apiSend('batch', {actions:want}, S.token).then(function(j){
+      if(!j || !j.ok || !j.data) return;
+      want.forEach(function(w){
+        var r = j.data[w.key];
+        if(r && r.ok){ ocSet(ocKey(w.action, w.payload), r.data); }
+      });
+    }).catch(function(){});
+  }, 400);
+}
 
 </script>
 </body>
