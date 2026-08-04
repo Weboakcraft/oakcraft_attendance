@@ -1,5 +1,5 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v2';
+var CACHE = 'oakcraft-shell-v3';
 var ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', function(e){
@@ -20,10 +20,10 @@ self.addEventListener('message', function(e){
 });
 
 /* Same-origin GET: stale-while-revalidate.
-   Cached copy turant serve hoti hai, aur background me server se fresh
-   copy laakar cache update kar di jaati hai (HTTP cache bypass karke,
-   taaki naya deploy agli load par hi mil jaye).
-   Google APIs / Apps Script / CDN seedhe network par jaate hain. */
+   The cached copy is served immediately, while a fresh copy is fetched from the
+   server in the background and written into the cache (bypassing the HTTP cache,
+   so a new deploy is picked up on the very next load).
+   Google APIs / Apps Script / CDN requests always go straight to the network. */
 self.addEventListener('fetch', function(e){
   var req = e.request;
   if(req.method !== 'GET') return;
