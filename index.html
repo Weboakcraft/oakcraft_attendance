@@ -284,48 +284,159 @@ const fmtDW = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'
 const INR = n => '₹' + Number(n||0).toLocaleString('en-IN');
 
 /* ================= API ================= */
-async function api(action, payload={}, opts={}){
+async function apiSend(action, payload, tok){
   const res = await fetch(CONFIG.API_URL, {
     method:'POST', redirect:'follow',
     headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({ action, idToken:S.token, payload })
+    body: JSON.stringify({ action, idToken:tok, payload })
   });
-  const j = await res.json();
+  return res.json();
+}
+async function api(action, payload={}, opts={}){
+  let j = await apiSend(action, payload, S.token);
+  /* Google ka ID token sirf ~1 ghante valid rehta hai. Expire hone par user ko
+     login screen par wapas phenkne ke bajaye chupchap naya token lete hain aur
+     wahi request dobara bhej dete hain - user ko dobara sign in nahi karna padta. */
+  if(!j.ok && String(j.error).indexOf('AUTH:')===0 && !opts.noRenew){
+    try{ await ocRenewToken(); j = await apiSend(action, payload, S.token); }catch(e){}
+  }
   if(!j.ok){
-    if(String(j.error).startsWith('AUTH:') && !opts.noRelogin){ ocClearToken(); }
+    if(String(j.error).indexOf('AUTH:')===0 && !opts.noRelogin){ ocSessionEnded(j.error); }
     throw new Error(j.error||'Request failed');
   }
   return j.data;
 }
 
-/* ================= AUTH ================= */
+/* ================= AUTH / SESSION =================
+   Rule: user ek hi baar sign in kare. Dobara Google prompt SIRF tab aaye jab
+     (a) user khud Logout kare, ya
+     (b) Google session hi khatam ho jaye aur silent renew fail ho jaye.
+   ID token ko "session" ki tarah treat nahi karte - wo short-lived proof hai,
+   isliye zarurat par background me silently refresh kar lete hain. */
+var OC_TOK_KEY='oc_tok', OC_HINT_KEY='oc_hint';
+var OC_PERSIST_ALL_ROLES = true; /* false = Admin/HR ko har browser session me dobara login karna padega */
+var ocGsiInit=false, ocRenewJob=null, ocRenewTimer=null;
+
+function ocJwt(tok){ try{ return JSON.parse(atob(String(tok).split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return null; } }
+function ocTokenAlive(tok, skewMs){ var p=ocJwt(tok); return !!(p && p.exp && (p.exp*1000 - (skewMs||0)) > Date.now()); }
+function ocHint(){ try{ return localStorage.getItem(OC_HINT_KEY)||''; }catch(e){ return ''; } }
+function ocSaveToken(tok, persist){
+  var p=ocJwt(tok);
+  try{ if(p && p.email){ localStorage.setItem(OC_HINT_KEY, p.email); } }catch(e){}
+  try{
+    if(persist===false){ sessionStorage.setItem(OC_TOK_KEY,tok); localStorage.removeItem(OC_TOK_KEY); }
+    else { localStorage.setItem(OC_TOK_KEY,tok); sessionStorage.removeItem(OC_TOK_KEY); }
+  }catch(e){ try{ sessionStorage.setItem(OC_TOK_KEY,tok); }catch(_e){} }
+}
+function ocGetToken(){ try{ return sessionStorage.getItem(OC_TOK_KEY) || localStorage.getItem(OC_TOK_KEY); }catch(e){ return null; } }
+function ocClearToken(){ try{ sessionStorage.removeItem(OC_TOK_KEY); localStorage.removeItem(OC_TOK_KEY); }catch(e){} }
+function ocApplyRoleStorage(role){
+  var priv = ['Admin','HR'].indexOf(role) !== -1;
+  if(S.token){ ocSaveToken(S.token, OC_PERSIST_ALL_ROLES ? true : !priv); }
+}
+
+/* ---- Google Identity: initialize sirf ek baar, button jab chahiye tab render ---- */
+function ocGsiLoaded(){ return !!(window.google && google.accounts && google.accounts.id); }
+function initGSI(){
+  if(!ocGsiLoaded()) return false;
+  if(!ocGsiInit){
+    var o={ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true, itp_support:true, use_fedcm_for_prompt:true, cancel_on_tap_outside:false };
+    var h=ocHint(); if(h){ o.login_hint=h; }
+    google.accounts.id.initialize(o);
+    ocGsiInit=true;
+  }
+  if($('#gbtn')){ google.accounts.id.renderButton($('#gbtn'), { theme:'filled_black', size:'large', shape:'pill', width:300, text:'signin_with' }); }
+  return true;
+}
+function ocWhenGsi(){
+  return new Promise(function(res,rej){
+    if(ocGsiLoaded()) return res();
+    var n=0, iv=setInterval(function(){
+      if(ocGsiLoaded()){ clearInterval(iv); res(); }
+      else if(++n>80){ clearInterval(iv); rej(new Error('Google sign-in load nahi ho paya')); }
+    },120);
+  });
+}
+/* Silent renew - naya ID token bina kisi click ke (One Tap auto re-authenticate) */
+function ocRenewToken(){
+  if(ocRenewJob) return ocRenewJob.promise;
+  var job={};
+  job.promise = new Promise(function(res,rej){
+    job.resolve=res; job.reject=rej;
+    ocWhenGsi().then(function(){ initGSI(); try{ google.accounts.id.prompt(); }catch(e){} }, rej);
+    job.timer=setTimeout(function(){ if(ocRenewJob===job){ ocRenewJob=null; rej(new Error('renew-timeout')); } }, 12000);
+  });
+  job.promise.catch(function(){});
+  ocRenewJob=job;
+  return job.promise;
+}
+function ocScheduleRenew(){
+  if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
+  var p=ocJwt(S.token); if(!p || !p.exp) return;
+  var ms = p.exp*1000 - Date.now() - 5*60*1000; /* expiry se 5 min pehle refresh */
+  ocRenewTimer = setTimeout(function(){ ocRenewToken().catch(function(){}); }, Math.max(20000, Math.min(ms, 2000000000)));
+}
+function onCred(resp){
+  if(!resp || !resp.credential) return;
+  S.token = resp.credential;
+  ocSaveToken(S.token, true);
+  ocScheduleRenew();
+  var job = ocRenewJob;
+  if(job){ ocRenewJob=null; clearTimeout(job.timer); job.resolve(S.token); return; } /* renew tha - screen jahan hai wahin rehne do */
+  boot();
+}
+/* ---- login screen sirf logout ya asli session-expiry par ---- */
+function ocShowLogin(msg){
+  $('#app').style.display='none';
+  $('#loginScreen').style.display='flex';
+  $('#gbtn').innerHTML='';
+  initGSI();
+  if(msg){ $('#loginErr').style.display='block'; $('#loginErr').textContent=msg; }
+}
+function ocResuming(){
+  var g=$('#gbtn');
+  if(g){ g.innerHTML='<div style="display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.65);font-size:13px"><span class="spin"></span> Session resume ho raha hai...</div>'; }
+}
+function ocSessionEnded(err){
+  ocClearToken(); S.token=null;
+  if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
+  var m=String(err||'').replace('AUTH:','').trim();
+  ocShowLogin(m || 'Session expire ho gaya - dobara sign in karein.');
+}
 window.addEventListener('load', () => {
   if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
     $('#loginErr').style.display='block';
-    $('#loginErr').textContent='⚙️ Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3–5).';
+    $('#loginErr').textContent='Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3-5).';
   }
-  const t = setInterval(()=>{ if(window.google?.accounts?.id){ clearInterval(t); initGSI(); } }, 120);
-  const saved = ocGetToken();
-  if(saved){ S.token = saved; boot().catch(()=>{ ocClearToken(); }); }
+  var saved = ocGetToken();
+  if(saved && ocTokenAlive(saved, 60000)){
+    S.token = saved; ocScheduleRenew(); boot();          /* token valid hai - seedha app, koi Google UI nahi */
+  } else if(saved || ocHint()){
+    ocResuming();                                        /* pehle login ho chuka hai - chupchap naya token */
+    ocRenewToken().then(function(){ boot(); }, function(){ ocShowLogin('Session expire ho gaya - dobara sign in karein.'); });
+  } else {
+    ocWhenGsi().then(function(){ initGSI(); }, function(){});  /* pehli baar - normal sign-in button */
+  }
 });
-function initGSI(){
-  google.accounts.id.initialize({ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true });
-  google.accounts.id.renderButton($('#gbtn'), { theme:'filled_black', size:'large', shape:'pill', width:300, text:'signin_with' });
+/* dusre tab me token refresh hua to yahan bhi use kar lo */
+window.addEventListener('storage', function(e){
+  if(e.key===OC_TOK_KEY && e.newValue){ S.token=e.newValue; ocScheduleRenew(); }
+});
+/* tab background me tha aur token beech me expire ho gaya - wapas aate hi silent refresh */
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState==='visible' && S.token && !ocTokenAlive(S.token, 60000)){ ocRenewToken().catch(function(){}); }
+});
+function logout(){
+  ocClearToken();
+  try{ localStorage.removeItem(OC_HINT_KEY); }catch(e){}
+  if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
+  try{ ocTrim(); }catch(e){}                /* cached screens bhi hata do */
+  try{ google.accounts.id.disableAutoSelect(); }catch(e){}
+  location.reload();
 }
-function onCred(resp){ S.token = resp.credential; ocSaveToken(S.token,true); boot(); }
-function logout(){ ocClearToken(); try{google.accounts.id.disableAutoSelect();}catch(e){} location.reload(); }
 /* ===== THEME (dark / light) ===== */
 function applyTheme(t){ if(t==='dark'){ document.documentElement.setAttribute('data-theme','dark'); } else { document.documentElement.removeAttribute('data-theme'); } }
 function toggleTheme(){ const cur = document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'; const next = cur==='dark' ? 'light' : 'dark'; try{ localStorage.setItem('oc_theme', next); }catch(e){} applyTheme(next); }
-/* ===== SESSION / TOKEN STORAGE =====
-   Regular users stay logged in across browser sessions (localStorage).
-   Admin & HR are kept only in sessionStorage, so they must re-login each
-   browser session for security. Role is applied once the profile loads. */
-var OC_TOK_KEY='oc_tok';
-function ocSaveToken(tok, persist){ try{ if(persist){ localStorage.setItem(OC_TOK_KEY,tok); sessionStorage.removeItem(OC_TOK_KEY); } else { sessionStorage.setItem(OC_TOK_KEY,tok); localStorage.removeItem(OC_TOK_KEY); } }catch(e){ try{ sessionStorage.setItem(OC_TOK_KEY,tok); }catch(_e){} } }
-function ocGetToken(){ try{ return sessionStorage.getItem(OC_TOK_KEY) || localStorage.getItem(OC_TOK_KEY); }catch(e){ return null; } }
-function ocClearToken(){ try{ sessionStorage.removeItem(OC_TOK_KEY); localStorage.removeItem(OC_TOK_KEY); }catch(e){} }
-function ocApplyRoleStorage(role){ var priv = ['Admin','HR'].indexOf(role) !== -1; if(S.token){ ocSaveToken(S.token, !priv); } }
 
 async function boot(){
   $('#loginErr').style.display='none';
