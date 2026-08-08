@@ -7,7 +7,9 @@
 <script>/* apply saved theme early to avoid flash */(function(){try{var t=localStorage.getItem('oc_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();</script>
 <title>OakCraft Attendance</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f1420'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23e8b34b' font-family='Arial' font-weight='bold'>O</text></svg>">
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Google Sign-In is NOT loaded up-front any more. An employee who is already
+     signed in never needs it, so the app opens without waiting for it at all.
+     ocLoadGsi() injects it on demand, only on the login screen. -->
 <link rel="preconnect" href="https://accounts.google.com" crossorigin>
 <link rel="preconnect" href="https://script.google.com" crossorigin>
 <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
@@ -351,7 +353,13 @@ method:'POST', redirect:'follow', signal: ctl.signal,
 headers:{'Content-Type':'text/plain;charset=utf-8'},
 body: JSON.stringify({ action, idToken:tok, payload })
 });
-return await res.json();
+const j = await res.json();
+/* The backend hands back a fresh 90-day app session token whenever one is due.
+   Saving it here is what turns the login into a genuine one-time login. */
+if(j && j.session){
+  try{ S.token = j.session; ocSaveToken(j.session, true); ocScheduleRenew(); }catch(e){}
+}
+return j;
 }catch(e){
 throw new Error(e && e.name==='AbortError' ? 'Server is taking too long — please try again.' : 'Network error — check your connection.');
 }finally{ clearTimeout(kill); }
@@ -382,11 +390,31 @@ var OC_PERSIST_ALL_ROLES = true; /* false = Admin/HR must sign in again in every
 var ocGsiInit=false, ocRenewJob=null, ocRenewTimer=null;
 
 function ocJwt(tok){ try{ return JSON.parse(atob(String(tok).split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return null; } }
-function ocTokenAlive(tok, skewMs){ var p=ocJwt(tok); return !!(p && p.exp && (p.exp*1000 - (skewMs||0)) > Date.now()); }
+/* Two kinds of token can be in play:
+     ocs1.*  - our own app session, signed by the backend, valid 90 days
+     JWT     - a raw Google ID token, valid ~1 hour (only used for the very first login)
+   Everything below understands both. */
+function ocIsSess(t){ return String(t||'').indexOf('ocs1.')===0; }
+function ocSessBody(t){
+  try{
+    var b=String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+    while(b.length%4) b+='=';
+    return JSON.parse(atob(b));
+  }catch(e){ return null; }
+}
+function ocSessExp(t){ var p=ocSessBody(t); return p && p.x ? Number(p.x) : 0; }
+function ocTokEmail(t){
+  if(ocIsSess(t)){ var s=ocSessBody(t); return s && s.e ? s.e : ''; }
+  var p=ocJwt(t); return p && p.email ? p.email : '';
+}
+function ocTokenAlive(tok, skewMs){
+  if(ocIsSess(tok)) return (ocSessExp(tok) - (skewMs||0)) > Date.now();
+  var p=ocJwt(tok); return !!(p && p.exp && (p.exp*1000 - (skewMs||0)) > Date.now());
+}
 function ocHint(){ try{ return localStorage.getItem(OC_HINT_KEY)||''; }catch(e){ return ''; } }
 function ocSaveToken(tok, persist){
-  var p=ocJwt(tok);
-  try{ if(p && p.email){ localStorage.setItem(OC_HINT_KEY, p.email); } }catch(e){}
+  var em=ocTokEmail(tok);
+  try{ if(em){ localStorage.setItem(OC_HINT_KEY, em); } }catch(e){}
   try{
     if(persist===false){ sessionStorage.setItem(OC_TOK_KEY,tok); localStorage.removeItem(OC_TOK_KEY); }
     else { localStorage.setItem(OC_TOK_KEY,tok); sessionStorage.removeItem(OC_TOK_KEY); }
@@ -402,31 +430,49 @@ function ocApplyRoleStorage(role){
 /* ---- Google Identity: initialize once, render the button whenever needed ---- */
 function ocGsiLoaded(){ return !!(window.google && google.accounts && google.accounts.id); }
 function initGSI(){
-/* GSI may still be loading (it is async defer). Retry instead of leaving an empty card. */
-if(!ocGsiLoaded()){ ocWhenGsi().then(function(){ initGSI(); }, function(){}); return false; }
+/* GSI is loaded lazily now, so the first call usually lands here and waits. */
+if(!ocGsiLoaded()){
+ocWhenGsi().then(function(){ initGSI(); }, function(){
+  try{ ocShowFallbackLink('The Google sign-in button could not load on this device.'); }catch(e){}
+});
+return false;
+}
 if(!ocGsiInit){
-var o={ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true, itp_support:true, use_fedcm_for_prompt:true, cancel_on_tap_outside:false };
+var o={ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true, itp_support:true,
+        use_fedcm_for_prompt:true, use_fedcm_for_button:true, cancel_on_tap_outside:false };
 var h=ocHint(); if(h){ o.login_hint=h; }
-google.accounts.id.initialize(o);
+try{ google.accounts.id.initialize(o); }
+catch(e){ try{ ocShowFallbackLink('Google sign-in could not start on this device.'); }catch(_e){} return false; }
 ocGsiInit=true;
 }
 var g=$('#gbtn');
 if(g){
 /* a fixed width of 300 is rejected on narrow phones and renders nothing */
 var w=Math.max(200, Math.min(360, Math.floor(g.getBoundingClientRect().width) || 300));
-google.accounts.id.renderButton(g, { theme:'filled_black', size:'large', shape:'pill', width:w, text:'signin_with' });
+try{ google.accounts.id.renderButton(g, { theme:'filled_black', size:'large', shape:'pill', width:w, text:'signin_with' }); }
+catch(e){ try{ ocShowFallbackLink('The Google sign-in button could not be drawn on this device.'); }catch(_e){} return false; }
 }
 return true;
 }
-function ocWhenGsi(){
-  return new Promise(function(res,rej){
+/* Injected on demand - never on the critical path of an already signed-in user. */
+var ocGsiReq=null;
+function ocLoadGsi(){
+  if(ocGsiReq) return ocGsiReq;
+  ocGsiReq = new Promise(function(res, rej){
     if(ocGsiLoaded()) return res();
+    var s=document.createElement('script');
+    s.src='https://accounts.google.com/gsi/client';
+    s.async=true; s.defer=true;
+    s.onerror=function(){ rej(new Error('Google sign-in failed to load')); };
+    (document.head||document.documentElement).appendChild(s);
     var n=0, iv=setInterval(function(){
       if(ocGsiLoaded()){ clearInterval(iv); res(); }
-      else if(++n>80){ clearInterval(iv); rej(new Error('Google sign-in failed to load')); }
-    },120);
+      else if(++n>100){ clearInterval(iv); rej(new Error('Google sign-in failed to load')); }
+    },100);
   });
+  return ocGsiReq;
 }
+function ocWhenGsi(){ return ocGsiLoaded() ? Promise.resolve() : ocLoadGsi(); }
 /* Silent renew - a fresh ID token without any click (One Tap auto re-authenticate) */
 function ocRenewToken(){
   if(ocRenewJob) return ocRenewJob.promise;
@@ -442,6 +488,9 @@ function ocRenewToken(){
 }
 function ocScheduleRenew(){
   if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
+  /* A 90-day app session needs no Google renew at all. This single line is what
+     stops the app asking for a login every morning and every evening. */
+  if(ocIsSess(S.token)) return;
   var p=ocJwt(S.token); if(!p || !p.exp) return;
   var ms = p.exp*1000 - Date.now() - 5*60*1000; /* refresh 5 min before expiry */
   ocRenewTimer = setTimeout(function(){ ocRenewToken().catch(function(){}); }, Math.max(20000, Math.min(ms, 2000000000)));
@@ -480,18 +529,68 @@ function ocSessionEnded(err){
   var m=String(err||'').replace('AUTH:','').trim();
   ocShowLogin(m || 'Your session has expired — please sign in again.');
 }
+/* ---- Safe-mode sign-in ----------------------------------------------------
+   On a few Android/iOS builds the Google popup opens accounts.google.com and
+   renders a blank white page, so the employee is stuck. This full-page redirect
+   flow uses no popup and no third-party cookie, so it works there.
+   It is offered only when the normal button genuinely fails. */
+function ocRedirectUri(){ return location.origin + location.pathname.replace(/index\.html$/, ''); }
+function ocRedirectLogin(){
+  var n = 'n' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try{ sessionStorage.setItem('oc_nonce', n); }catch(e){}
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth'
+    + '?client_id=' + encodeURIComponent(CONFIG.GOOGLE_CLIENT_ID)
+    + '&response_type=id_token'
+    + '&scope=' + encodeURIComponent('openid email profile')
+    + '&redirect_uri=' + encodeURIComponent(ocRedirectUri())
+    + '&nonce=' + encodeURIComponent(n)
+    + '&prompt=select_account';
+}
+function ocCatchRedirect(){
+  var h = String(location.hash||'');
+  if(h.indexOf('id_token=')<0) return false;
+  var t='';
+  try{ t = new URLSearchParams(h.replace(/^#/,'')).get('id_token')||''; }catch(e){}
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  if(!t) return false;
+  S.token = t; ocSaveToken(t, true);
+  return true;
+}
+function ocShowFallbackLink(why){
+  if(document.getElementById('ocAltLogin')) return;
+  var g=$('#gbtn'); if(!g || !g.parentNode) return;
+  var d=document.createElement('div'); d.id='ocAltLogin';
+  d.style.cssText='margin-top:14px;text-align:center;font-size:13px;color:rgba(255,255,255,.7)';
+  d.innerHTML='<div style="margin-bottom:8px">'+esc(why||'')+'</div>'
+    + '<button class="btn btn-gold" style="width:100%" onclick="ocRedirectLogin()">Sign in with Google — safe mode</button>';
+  g.parentNode.appendChild(d);
+}
+/* If nothing has been drawn inside #gbtn after 8 s, this device is one of the
+   broken ones - offer safe mode instead of leaving a blank card. */
+function ocLoginFallbackWatch(){
+  setTimeout(function(){
+    var g=$('#gbtn');
+    if(g && !g.querySelector('iframe, div, span')){
+      ocShowFallbackLink('Taking longer than usual on this device?');
+    }
+  }, 8000);
+}
 function ocStart(){
 if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
 $('#loginErr').style.display='block';
 $('#loginErr').textContent='Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3-5).';
 }
+/* just came back from safe-mode sign-in */
+if(ocCatchRedirect()){ ocKickBootstrap(); boot(); return; }
 var saved = ocGetToken();
 if(saved && ocTokenAlive(saved, 60000)){
-S.token = saved; ocKickBootstrap(); ocScheduleRenew(); boot(); /* still valid - straight into the app */
+/* Already signed in: straight into the app, Google is never contacted. */
+S.token = saved; ocKickBootstrap(); ocScheduleRenew(); boot();
 return;
 }
 /* The button is rendered FIRST, so a failed silent renew can never leave an empty card. */
 initGSI();
+ocLoginFallbackWatch();
 if(saved || ocHint()){
 ocResuming();
 ocRenewToken().then(function(){ boot(); }, function(){ ocResumeDone(); });
@@ -1484,7 +1583,7 @@ function ocCached(a, p){ var c = ocGet(ocKey(a, p||{})); return c ? c.d : null; 
    boot() needs the answer. */
 function ocKickBootstrap(){
 if(!OC_BOOT_REQ && S.token){
-OC_BOOT_REQ = apiSend('bootstrap', {month:S.month}, S.token, 20000).catch(function(){ return null; });
+OC_BOOT_REQ = apiSend('bootstrap', {month:S.month}, S.token, 15000).catch(function(){ return null; });
 }
 return OC_BOOT_REQ;
 }
