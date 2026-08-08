@@ -342,13 +342,19 @@ const fmtDW = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'
 const INR = n => '₹' + Number(n||0).toLocaleString('en-IN');
 
 /* ================= API ================= */
-async function apiSend(action, payload, tok){
-  const res = await fetch(CONFIG.API_URL, {
-    method:'POST', redirect:'follow',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({ action, idToken:tok, payload })
-  });
-  return res.json();
+async function apiSend(action, payload, tok, ms){
+const ctl = new AbortController();
+const kill = setTimeout(function(){ ctl.abort(); }, ms || 20000);
+try{
+const res = await fetch(CONFIG.API_URL, {
+method:'POST', redirect:'follow', signal: ctl.signal,
+headers:{'Content-Type':'text/plain;charset=utf-8'},
+body: JSON.stringify({ action, idToken:tok, payload })
+});
+return await res.json();
+}catch(e){
+throw new Error(e && e.name==='AbortError' ? 'Server is taking too long — please try again.' : 'Network error — check your connection.');
+}finally{ clearTimeout(kill); }
 }
 async function api(action, payload={}, opts={}){
   let j = await apiSend(action, payload, S.token);
@@ -396,15 +402,21 @@ function ocApplyRoleStorage(role){
 /* ---- Google Identity: initialize once, render the button whenever needed ---- */
 function ocGsiLoaded(){ return !!(window.google && google.accounts && google.accounts.id); }
 function initGSI(){
-  if(!ocGsiLoaded()) return false;
-  if(!ocGsiInit){
-    var o={ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true, itp_support:true, use_fedcm_for_prompt:true, cancel_on_tap_outside:false };
-    var h=ocHint(); if(h){ o.login_hint=h; }
-    google.accounts.id.initialize(o);
-    ocGsiInit=true;
-  }
-  if($('#gbtn')){ google.accounts.id.renderButton($('#gbtn'), { theme:'filled_black', size:'large', shape:'pill', width:300, text:'signin_with' }); }
-  return true;
+/* GSI may still be loading (it is async defer). Retry instead of leaving an empty card. */
+if(!ocGsiLoaded()){ ocWhenGsi().then(function(){ initGSI(); }, function(){}); return false; }
+if(!ocGsiInit){
+var o={ client_id: CONFIG.GOOGLE_CLIENT_ID, callback: onCred, auto_select:true, itp_support:true, use_fedcm_for_prompt:true, cancel_on_tap_outside:false };
+var h=ocHint(); if(h){ o.login_hint=h; }
+google.accounts.id.initialize(o);
+ocGsiInit=true;
+}
+var g=$('#gbtn');
+if(g){
+/* a fixed width of 300 is rejected on narrow phones and renders nothing */
+var w=Math.max(200, Math.min(360, Math.floor(g.getBoundingClientRect().width) || 300));
+google.accounts.id.renderButton(g, { theme:'filled_black', size:'large', shape:'pill', width:w, text:'signin_with' });
+}
+return true;
 }
 function ocWhenGsi(){
   return new Promise(function(res,rej){
@@ -422,7 +434,7 @@ function ocRenewToken(){
   job.promise = new Promise(function(res,rej){
     job.resolve=res; job.reject=rej;
     ocWhenGsi().then(function(){ initGSI(); try{ google.accounts.id.prompt(); }catch(e){} }, rej);
-    job.timer=setTimeout(function(){ if(ocRenewJob===job){ ocRenewJob=null; rej(new Error('renew-timeout')); } }, 12000);
+    job.timer=setTimeout(function(){ if(ocRenewJob===job){ ocRenewJob=null; rej(new Error('renew-timeout')); } }, 3500);
   });
   job.promise.catch(function(){});
   ocRenewJob=job;
@@ -445,6 +457,7 @@ function onCred(resp){
 }
 /* ---- login screen only on logout or a genuine session expiry ---- */
 function ocShowLogin(msg){
+  try{ ocResumeDone(); }catch(e){}
   $('#app').style.display='none';
   $('#loginScreen').style.display='flex';
   $('#gbtn').innerHTML='';
@@ -452,30 +465,40 @@ function ocShowLogin(msg){
   if(msg){ $('#loginErr').style.display='block'; $('#loginErr').textContent=msg; }
 }
 function ocResuming(){
-  var g=$('#gbtn');
-  if(g){ g.innerHTML='<div style="display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.65);font-size:13px"><span class="spin"></span> Resuming your session…</div>'; }
+var g=$('#gbtn'); if(!g) return;
+if(!document.getElementById('ocResume')){
+var d=document.createElement('div'); d.id='ocResume';
+d.style.cssText='color:rgba(255,255,255,.65);font-size:13px;margin-bottom:12px;display:flex;gap:10px;justify-content:center;align-items:center';
+d.innerHTML='<span class="spin"></span> Resuming your session…';
+g.parentNode.insertBefore(d, g);
 }
+}
+function ocResumeDone(){ var d=document.getElementById('ocResume'); if(d && d.parentNode) d.parentNode.removeChild(d); }
 function ocSessionEnded(err){
   ocClearToken(); S.token=null;
   if(ocRenewTimer){ clearTimeout(ocRenewTimer); }
   var m=String(err||'').replace('AUTH:','').trim();
   ocShowLogin(m || 'Your session has expired — please sign in again.');
 }
-window.addEventListener('load', () => {
-  if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
-    $('#loginErr').style.display='block';
-    $('#loginErr').textContent='Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3-5).';
-  }
-  var saved = ocGetToken();
-  if(saved && ocTokenAlive(saved, 60000)){
-    S.token = saved; ocScheduleRenew(); boot();          /* token still valid - straight into the app, no Google UI */
-  } else if(saved || ocHint()){
-    ocResuming();                                        /* signed in before - fetch a new token silently */
-    ocRenewToken().then(function(){ boot(); }, function(){ ocShowLogin('Your session has expired — please sign in again.'); });
-  } else {
-    ocWhenGsi().then(function(){ initGSI(); }, function(){});  /* first visit - show the normal sign-in button */
-  }
-});
+function ocStart(){
+if(CONFIG.API_URL.startsWith('PASTE') || CONFIG.GOOGLE_CLIENT_ID.startsWith('PASTE')){
+$('#loginErr').style.display='block';
+$('#loginErr').textContent='Setup incomplete: fill in API_URL and GOOGLE_CLIENT_ID in the CONFIG section of index.html (Setup Guide Step 3-5).';
+}
+var saved = ocGetToken();
+if(saved && ocTokenAlive(saved, 60000)){
+S.token = saved; ocKickBootstrap(); ocScheduleRenew(); boot(); /* still valid - straight into the app */
+return;
+}
+/* The button is rendered FIRST, so a failed silent renew can never leave an empty card. */
+initGSI();
+if(saved || ocHint()){
+ocResuming();
+ocRenewToken().then(function(){ boot(); }, function(){ ocResumeDone(); });
+}
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ocStart);
+else setTimeout(ocStart, 0);
 /* another tab refreshed the token - use it here as well */
 window.addEventListener('storage', function(e){
   if(e.key===OC_TOK_KEY && e.newValue){ S.token=e.newValue; ocScheduleRenew(); }
@@ -496,33 +519,40 @@ function logout(){
 function applyTheme(t){ if(t==='dark'){ document.documentElement.setAttribute('data-theme','dark'); } else { document.documentElement.removeAttribute('data-theme'); } }
 function toggleTheme(){ const cur = document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'; const next = cur==='dark' ? 'light' : 'dark'; try{ localStorage.setItem('oc_theme', next); }catch(e){} applyTheme(next); }
 
+function ocPaint(d, quiet){
+S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes||[]; S.geofence=d.geofence||null;
+ocApplyRoleStorage(S.profile && S.profile.role);
+ocResumeDone();
+$('#loginErr').style.display='none';
+$('#loginScreen').style.display='none';
+$('#app').style.display='block';
+buildNav(); go(S.view||'dashboard');
+if(!quiet) ocPrefetch();
+}
 async function boot(){
-  $('#loginErr').style.display='none';
-  $('#gbtn').innerHTML='<div class="spin"></div>';
-  try{
-    /* One request brings the profile AND the dashboard. The backend costs about
-       1.5 s of fixed overhead per call, so this nearly halves the wait for the
-       first usable screen. */
-    const d = await ocFirstLoad();
-    S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes; S.geofence=d.geofence||null; ocApplyRoleStorage(S.profile&&S.profile.role);
-    $('#loginScreen').style.display='none';
-    $('#app').style.display='block';
-    buildNav(); go('dashboard');
-    ocPrefetch();
-  }catch(err){
-    $('#loginScreen').style.display='flex';
-    if(window.google?.accounts?.id) initGSI();
-    $('#loginErr').style.display='block';
-    const msg = err.message||'Login failed';
-    /* NOTE: the Apps Script backend may still reply in Hinglish, so both are matched */
-    if(/register nahi|access nahi|not registered|no access/i.test(msg)){
-      $('#loginErr').innerHTML = esc(msg) +
-        `<div style="margin-top:12px;text-align:left"><input id="reqPhone" placeholder="Phone (optional)" style="margin-bottom:8px">
-        <button class="btn btn-gold" style="width:100%" onclick="doRequestAccess(this)">🙋 Request Access — Send to HR</button></div>`;
-    } else {
-      $('#loginErr').textContent = msg;
-    }
-  }
+$('#loginErr').style.display='none';
+ocKickBootstrap();
+var warm = ocCached('init', {});
+/* the app is on screen immediately from the last good answer, the network only refreshes it */
+if(warm && warm.profile){ try{ ocPaint(warm, true); }catch(e){} }
+try{
+ocPaint(await ocFirstLoad(), false);
+}catch(err){
+if(warm && warm.profile) return; /* keep the cached app rather than throwing the user out */
+ocResumeDone();
+$('#loginScreen').style.display='flex';
+initGSI();
+$('#loginErr').style.display='block';
+var msg = err.message||'Login failed';
+/* NOTE: the Apps Script backend may still reply in Hinglish, so both are matched */
+if(/register nahi|access nahi|not registered|no access/i.test(msg)){
+$('#loginErr').innerHTML = esc(msg) +
+'<div style="margin-top:12px;text-align:left"><input id="reqPhone" placeholder="Phone (optional)" style="margin-bottom:8px">' +
+'<button class="btn btn-gold" style="width:100%" onclick="doRequestAccess(this)">🙋 Request Access — Send to HR</button></div>';
+} else {
+$('#loginErr').textContent = msg;
+}
+}
 }
 async function doRequestAccess(btn){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> Sending…';
@@ -1447,18 +1477,30 @@ try{ fetch(CONFIG.API_URL, {method:'GET', redirect:'follow', cache:'no-store'}).
 
 /* Profile + dashboard in a single request, with a graceful fall back to the old
    two-call path if the backend does not know this action yet. */
+var OC_BOOT_REQ = null;
+function ocCached(a, p){ var c = ocGet(ocKey(a, p||{})); return c ? c.d : null; }
+/* Fires the single bootstrap request as soon as a token exists - in parallel with
+   Google Sign-In finishing - so the round trip is already half done by the time
+   boot() needs the answer. */
+function ocKickBootstrap(){
+if(!OC_BOOT_REQ && S.token){
+OC_BOOT_REQ = apiSend('bootstrap', {month:S.month}, S.token, 20000).catch(function(){ return null; });
+}
+return OC_BOOT_REQ;
+}
 async function ocFirstLoad(){
-  try{
-    var d = await api('bootstrap', {month:S.month}, {noRelogin:true});
-    if(d && d.init){
-      ocSet(ocKey('init', {}), d.init);
-      if(d.dashboard){ ocSet(ocKey('getDashboard', {month:S.month}), d.dashboard); }
-      return d.init;
-    }
-  }catch(e){
-    if(navigator.onLine === false){ var c = ocGet(ocKey('init', {})); if(c) return c.d; }
-  }
-  return await api('init', {}, {noRelogin:true});
+var j = null;
+try{ j = await (OC_BOOT_REQ || ocKickBootstrap()); }catch(e){}
+OC_BOOT_REQ = null;
+var d = j && j.ok ? j.data : null;
+if(d && d.init){
+ocSet(ocKey('init', {}), d.init);
+if(d.dashboard){ ocSet(ocKey('getDashboard', {month:S.month}), d.dashboard); }
+return d.init;
+}
+if(j && !j.ok && String(j.error).indexOf('AUTH:')===0) throw new Error(j.error);
+/* backend does not know 'bootstrap' (older deployment) - fall back to the old path */
+return await api('init', {}, {noRelogin:true});
 }
 
 /* Once the dashboard is on screen, warm the remaining screens in ONE request so
