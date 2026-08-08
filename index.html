@@ -110,6 +110,7 @@ h1,h2,h3{letter-spacing:-.02em}
 .btn-o:hover{border-color:var(--muted);color:var(--ink)}
 .btn-danger{background:var(--crit);color:#fff}
 .btn-good{background:var(--good);color:#fff}
+.btn-good:hover{filter:brightness(1.08);transform:translateY(-1px)}
 .btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
 .btn-sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
 .chip{display:inline-flex;align-items:center;gap:5px;padding:3.5px 10px;border-radius:99px;font-size:11.5px;font-weight:700;white-space:nowrap}
@@ -995,37 +996,99 @@ function calendarView(rows, month){
 }
 
 /* ================= REPORTS ================= */
-let repFilter={emp:'', status:'', mode:'table'};
+let repFilter={emp:'', status:'', mode:'table', span:'month', from:'', to:''};
+
+/* ---------- month vs. date-range scope ----------
+   Reports can be scoped either to a whole month or to an explicit From -> To
+   date range. The choice lives in repFilter.span and is honoured by the table,
+   the summary tiles and the CSV download alike. */
+function repMonthBounds(m){
+  const y=+String(m).slice(0,4), mo=+String(m).slice(5,7);
+  const last=new Date(Date.UTC(y,mo,0)).getUTCDate();
+  return { from:m+'-01', to:m+'-'+String(last).padStart(2,'0') };
+}
+function repEnsureRange(){
+  const b=repMonthBounds(S.month);
+  if(!repFilter.from) repFilter.from=b.from;
+  if(!repFilter.to)   repFilter.to=b.to;
+  if(repFilter.from>repFilter.to){ const t=repFilter.from; repFilter.from=repFilter.to; repFilter.to=t; }
+}
+function repMonthsBetween(from,to){
+  const out=[]; let y=+from.slice(0,4), m=+from.slice(5,7);
+  const ey=+to.slice(0,4), em=+to.slice(5,7);
+  while(y<ey || (y===ey && m<=em)){ out.push(y+'-'+String(m).padStart(2,'0')); if(++m>12){ m=1; y++; } if(out.length>=24) break; }
+  return out;
+}
+/* A range can cross month boundaries, so every month it touches is fetched and
+   merged, then trimmed back to the exact From -> To window. */
+async function repFetchRange(from,to){
+  const packs=await Promise.all(repMonthsBetween(from,to).map(m=>api('getReports',{month:m}).then(d=>d.rows||[]).catch(()=>[])));
+  const seen={}, out=[];
+  packs.forEach(rs=>rs.forEach(r=>{
+    const d=String((r&&r.date)||'').slice(0,10);
+    if(!d || d<from || d>to) return;
+    const k=d+'|'+(r.code||r.name||'');
+    if(seen[k]) return; seen[k]=1; out.push(r);
+  }));
+  return out;
+}
+function repSetSpan(v){
+  repFilter.span=v;
+  if(v==='range'){ repEnsureRange(); repFilter.mode='table'; }
+  renderReports();
+}
+function repSpanLabel(){
+  return (repFilter.span==='range' && repFilter.from && repFilter.to)
+    ? fmtDW(repFilter.from)+' \u2192 '+fmtDW(repFilter.to)
+    : MONTH_NAME(S.month);
+}
+/* The rows currently on screen. Single source of truth for the table AND the
+   CSV download, so a download always matches exactly what is displayed. */
+function repRows(){
+  let rows=S.cache.reports||[];
+  if(repFilter.emp)    rows=rows.filter(r=>r.name===repFilter.emp);
+  if(repFilter.status) rows=rows.filter(r=>r.status===repFilter.status);
+  if(repFilter.span==='range' && repFilter.from && repFilter.to)
+    rows=rows.filter(r=>{ const d=String(r.date||'').slice(0,10); return d>=repFilter.from && d<=repFilter.to; });
+  return rows;
+}
 async function renderReports(){
   loadingView('Generating reports…');
-  let d; try{ d=await api('getReports',{month:S.month}); }catch(e){ return errView(e); }
-  S.cache.reports=d.rows;
+  let rows;
+  try{
+    if(repFilter.span==='range'){ repEnsureRange(); rows=await repFetchRange(repFilter.from, repFilter.to); }
+    else { const d=await api('getReports',{month:S.month}); rows=d.rows||[]; }
+  }catch(e){ return errView(e); }
+  S.cache.reports=rows;
   const isHR=['HR','Admin'].includes(S.profile.role);
-  const emps=[...new Set(d.rows.map(r=>r.name))].sort();
+  const emps=[...new Set(rows.map(r=>r.name))].sort();
   $('#main').innerHTML=`
-  <div class="topbar"><div><h2>Reports</h2><div class="sub">Daily attendance summary — computed live, never stale</div></div>
+  <div class="topbar"><div><h2>Reports</h2><div class="sub">${repSpanLabel()} \u00b7 daily attendance summary \u2014 computed live, never stale</div></div>
   <div class="top-actions">
     ${isHR?`<select class="searchbox" id="repEmp" onchange="repFilter.emp=this.value;drawReports()"><option value="">All employees</option>${emps.map(e=>`<option ${repFilter.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select>`:''}
     <select class="searchbox" style="max-width:150px" id="repSt" onchange="repFilter.status=this.value;drawReports()">
       <option value="">All statuses</option>${['Present','Half Day','Absent','Paid Leave','Week Off','Festival Holiday'].map(s=>`<option ${repFilter.status===s?'selected':''}>${s}</option>`).join('')}</select>
-    ${monthPicker('renderReports()')}
-    <div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">☰ Table</button>
-    <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">▦ Calendar</button></div>
-    <button class="btn btn-o" onclick="exportReportsCSV()">⬇ CSV</button>
+    <div class="seg"><button class="${repFilter.span==='month'?'on':''}" onclick="repSetSpan('month')">Month</button>
+    <button class="${repFilter.span==='range'?'on':''}" onclick="repSetSpan('range')">Date range</button></div>
+    ${repFilter.span==='month' ? monthPicker('renderReports()') : `
+      <input type="date" class="month-in" id="repFrom" value="${repFilter.from}" onchange="repFilter.from=this.value;renderReports()">
+      <span style="color:var(--muted);font-size:12.5px;font-weight:650">to</span>
+      <input type="date" class="month-in" id="repTo" value="${repFilter.to}" onchange="repFilter.to=this.value;renderReports()">`}
+    ${repFilter.span==='month' ? `<div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">\u2630 Table</button>
+    <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">\u25a6 Calendar</button></div>` : ''}
+    <button class="btn btn-good" onclick="exportReportsCSV()">\u2b07 Download Report</button>
   </div></div>
   <div class="grid g4" style="margin-bottom:16px" id="repTiles"></div>
   <div id="repBody"></div>`;
   drawReports();
 }
 function drawReports(){
-  let rows=S.cache.reports||[];
-  if(repFilter.emp) rows=rows.filter(r=>r.name===repFilter.emp);
-  if(repFilter.status) rows=rows.filter(r=>r.status===repFilter.status);
+  const rows=repRows();
   const sm={present:0,half:0,absent:0,leave:0};
   rows.forEach(r=>{ if(r.status==='Present'||r.status==='Working')sm.present++; else if(r.status==='Half Day')sm.half++; else if(r.status==='Absent')sm.absent++; else if(r.status==='Paid Leave')sm.leave++; });
   $('#repTiles').innerHTML = tile('Present',sm.present,'records','var(--good)')+tile('Half Day',sm.half,'records','var(--warn)')+tile('Absent',sm.absent,'records','var(--crit)')+tile('Paid Leave',sm.leave,'records','var(--violet)');
 
-  if(repFilter.mode==='cal'){
+  if(repFilter.mode==='cal' && repFilter.span!=='range'){
     // calendar always shows ONE employee
     const isHR=['HR','Admin'].includes(S.profile.role);
     const all=S.cache.reports||[];
@@ -1050,11 +1113,19 @@ function drawReports(){
     <td>${r.photoIn?`<a href="${esc(r.photoIn)}" target="_blank" title="Selfie">📷</a>`:''} ${r.mapIn?`<a href="${esc(r.mapIn)}" target="_blank" title="Location">📍</a>`:''}</td>
   </tr>`).join(''):'<tr><td colspan="8"><div class="empty">No records found</div></td></tr>'}</tbody>`;
 }
+function csvCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function repFileTag(){
+  const who=repFilter.emp ? repFilter.emp.trim().replace(/[^A-Za-z0-9]+/g,'_') : 'all_employees';
+  return who+'_'+(repFilter.span==='range' ? repFilter.from+'_to_'+repFilter.to : S.month);
+}
 function exportReportsCSV(){
-  const rows=S.cache.reports||[];
+  /* Exports exactly the filtered view: only the chosen employee when one is
+     selected, and the whole team when "All employees" is selected. */
+  const rows=[...repRows()].sort((a,b)=> String(a.date)===String(b.date) ? String(a.name).localeCompare(String(b.name)) : String(a.date).localeCompare(String(b.date)));
+  if(!rows.length){ toast('Nothing to download for this selection'); return; }
   const head=['Date','Employee','Code','Shift','Punch In','Punch Out','Hours','Status','Late','Leave Type'];
-  const csv=[head.join(',')].concat(rows.map(r=>[r.date,`"${r.name}"`,r.code,fmtTx(r.timing),fmtTx(r.punchIn)||'',fmtTx(r.punchOut)||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].join(','))).join('\n');
-  dl(csv,'attendance_report_'+S.month+'.csv');
+  const csv=[head.join(',')].concat(rows.map(r=>[r.date,r.name,r.code,fmtTx(r.timing),fmtTx(r.punchIn)||'',fmtTx(r.punchOut)||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].map(csvCell).join(','))).join('\n');
+  dl(csv,'attendance_report_'+repFileTag()+'.csv');
 }
 function dl(text,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click(); }
 
@@ -1276,7 +1347,7 @@ async function renderPayout(){
   const total=d.rows.reduce((a,r)=>a+r.net,0);
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (same as live AppSheet)'}</div></div>
-  <div class="top-actions">${monthPicker('renderPayout()')}<button class="btn btn-o" onclick="exportPayoutCSV()">⬇ CSV</button></div></div>
+  <div class="top-actions">${monthPicker('renderPayout()')}<button class="btn btn-good" onclick="exportPayoutCSV()">\u2b07 Download Payout Report</button></div></div>
   <div class="grid g3" style="margin-bottom:16px">
     ${tile('Total Payable', INR(total), d.rows.length+' employees','var(--good)')}
     ${tile('Total Advance', INR(d.rows.reduce((a,r)=>a+r.advance,0)),'will be deducted this month','var(--warn)')}
