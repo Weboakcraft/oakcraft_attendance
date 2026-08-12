@@ -1705,5 +1705,100 @@ function ocPrefetch(){
 }
 
 </script>
+<!-- ============================================================
+     SCALE PATCH - keeps the app responsive when the whole company
+     is on it at once. Nothing above this line was changed.
+       * every call gets a 30 s budget instead of 6 s and is retried
+         with a staggered backoff, so a momentary Google hiccup no
+         longer turns into "Cannot reach the server"
+       * at most 2 requests leave the browser at a time
+       * selfies are resized before upload (about 3 MB -> 100 KB)
+       * data re-syncs every 25 s using the cheap 'ping' stamp; the
+         heavy pull happens only when something actually changed
+     ============================================================ -->
+<script>
+(function () {
+  if (window.__ocScale) return;
+  window.__ocScale = true;
+
+  var MAX_PARALLEL = 2, running = 0, waitQ = [];
+  function slot() { return new Promise(function (res) { if (running < MAX_PARALLEL) { running++; res(); } else waitQ.push(res); }); }
+  function release() { running--; var n = waitQ.shift(); if (n) { running++; n(); } }
+  function nap(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function shrinkSelfie(action, payload) {
+    if (action !== 'punch' || !payload || !payload.photoBase64) return Promise.resolve(payload);
+    if (String(payload.photoBase64).length < 200000) return Promise.resolve(payload);
+    return new Promise(function (done) {
+      try {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var max = 800, w = img.width, h = img.height, sc = Math.min(1, max / Math.max(w, h));
+            var c = document.createElement('canvas');
+            c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+            var out = c.toDataURL('image/jpeg', 0.72);
+            if (out && out.length < payload.photoBase64.length) {
+              var p = {}; for (var k in payload) p[k] = payload[k];
+              p.photoBase64 = out; done(p); return;
+            }
+          } catch (e) {}
+          done(payload);
+        };
+        img.onerror = function () { done(payload); };
+        img.src = payload.photoBase64;
+      } catch (e) { done(payload); }
+    });
+  }
+
+  var RAW = window.apiSend;
+  window.apiSend = async function (action, payload, tok, ms) {
+    payload = await shrinkSelfie(action, payload);
+    var budget = Math.max(Number(ms) || 0, 30000);
+    await slot();
+    try {
+      var last;
+      for (var i = 0; i < 3; i++) {
+        try { return await RAW(action, payload, tok, budget); }
+        catch (e) {
+          last = e;
+          if (/AUTH:|PERMISSION:|PUNCH:/i.test(String((e && e.message) || e))) throw e;
+          await nap(700 * Math.pow(2, i) + Math.floor(Math.random() * 500));
+        }
+      }
+      throw last;
+    } finally { release(); }
+  };
+
+  var lastV = null, timer = null, busy = false;
+  function currentView() {
+    var a = document.querySelector('[data-v].active');
+    return a ? a.getAttribute('data-v') : 'dashboard';
+  }
+  function dropReadCache() {
+    try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('occ:') === 0) localStorage.removeItem(k); }); } catch (e) {}
+  }
+  async function tick() {
+    if (busy || document.hidden || !navigator.onLine) return;
+    var view = currentView();
+    if (view === 'punch') return;
+    busy = true;
+    try {
+      var r = await window.api('ping', {});
+      var v = r && r.v;
+      if (v && lastV && v !== lastV) { dropReadCache(); if (typeof window.go === 'function') window.go(view); }
+      if (v) lastV = v;
+      if (typeof window.ocBanner === 'function') window.ocBanner(false);
+    } catch (e) {} finally { busy = false; }
+  }
+  function schedule() {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function () { tick().then(schedule); }, 25000 + (Math.floor(Math.random() * 6000) - 3000));
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+  setTimeout(function () { tick().then(schedule); }, 4000);
+})();
+</script>
 </body>
 </html>
