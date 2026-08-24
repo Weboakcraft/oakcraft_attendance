@@ -14,6 +14,9 @@
 <link rel="preconnect" href="https://script.google.com" crossorigin>
 <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <link rel="dns-prefetch" href="https://script.google.com">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="OakCraft">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -939,9 +942,12 @@ function stopGPS(){
 }
 function gpsShow(html, cls){ const d=$('#gpsDot'), t=$('#gpsText'); if(!d||!t) return; d.className='gps-dot '+(cls||''); t.innerHTML=html; }
 const GPS_RETRY = ' <a href="javascript:void(0)" onclick="getGPS()" style="color:var(--blue);font-weight:700;text-decoration:underline">Retry</a>';
+function gpsIsPWA(){ try{ return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone===true; }catch(e){ return false; } }
 function gpsErrText(err){
   switch(err && err.code){
-    case 1:  return 'Location permission blocked hai — address bar ke 🔒 / ⓘ icon par tap karo → Permissions → Location → Allow, phir'+GPS_RETRY;
+    case 1:  return gpsIsPWA()
+      ? 'Location permission blocked hai — home screen par app icon ko der tak dabao → App info → Permissions → Location → Allow. (iPhone: Settings → Privacy → Location Services → ON). Phir app band karke dobara kholo ya'+GPS_RETRY
+      : 'Location permission blocked hai — address bar ke 🔒 / ⓘ icon par tap karo → Permissions → Location → Allow, phir'+GPS_RETRY;
     case 2:  return 'Phone ki Location service band hai — phone settings me Location ON karo, phir'+GPS_RETRY;
     default: return 'GPS signal nahi mil raha (chhat ke neeche ho) — khidki ya darwaze ke paas jaakar'+GPS_RETRY;
   }
