@@ -1,5 +1,5 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v5';
+var CACHE = 'oakcraft-shell-v6';
 var ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', function(e){
