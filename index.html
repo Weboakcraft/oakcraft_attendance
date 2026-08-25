@@ -1410,10 +1410,11 @@ async function renderPayout(){
     ${tile('Absent Days', d.rows.reduce((a,r)=>a+r.absent,0)+' + '+d.rows.reduce((a,r)=>a+r.halfDays,0)+' half','across the whole team','var(--crit)')}
   </div>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Overtime</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
+    <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Paid Leave</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Overtime</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
     <tbody>${d.rows.map((r,i)=>`<tr>
       <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)} ${r.saved?'· <b style="color:var(--goodtext)">saved</b>':''}</div></div></div></td>
       <td class="num">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
+      <td class="num" title="Opening ${r.paidLeaveOpening||0} + 1 this month · used ${r.paidLeaveUsed||0} · paid half day ${r.paidHalfLeft?'available':'used'}">${String(r.type||'').toLowerCase()==='staff'?`<b>${r.paidLeaveBalance||0}</b>${r.paidHalfLeft?' <span style="color:var(--muted)">+&frac12;</span>':''}`:'—'}</td>
       <td class="num"><b>${r.payableDays}</b> / ${r.elapsedDays||r.totalDays}</td>
       <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
       <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}${(r.overtimeOverride===''||r.overtimeOverride==null)?' (auto)':' (manual)'}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
@@ -1421,7 +1422,7 @@ async function renderPayout(){
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
       <button class="btn btn-o btn-sm" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
-  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
+  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Chargeable Absent − Chargeable Half × 0.5 (Staff: 1 paid leave carried forward + 1 paid half day per month)'} (SOP Section 12)</p>`;
 }
 function payModal(i){
   const r=S.cache.payout.rows[i];
