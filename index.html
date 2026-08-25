@@ -1410,18 +1410,18 @@ async function renderPayout(){
     ${tile('Absent Days', d.rows.reduce((a,r)=>a+r.absent,0)+' + '+d.rows.reduce((a,r)=>a+r.halfDays,0)+' half','across the whole team','var(--crit)')}
   </div>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
+    <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Overtime</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
     <tbody>${d.rows.map((r,i)=>`<tr>
       <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)} ${r.saved?'· <b style="color:var(--goodtext)">saved</b>':''}</div></div></div></td>
       <td class="num">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
       <td class="num"><b>${r.payableDays}</b> / ${r.elapsedDays||r.totalDays}</td>
       <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
-      <td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
+      <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
       <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
       <button class="btn btn-o btn-sm" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
-  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
+  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
 }
 function payModal(i){
   const r=S.cache.payout.rows[i];
@@ -1433,6 +1433,7 @@ function payModal(i){
   </div>
   <label>Basic Salary</label><input type="number" id="pBasic" value="${r.basicSalary}">
   <label>Advance Salary (will be deducted)</label><input type="number" id="pAdv" value="${r.advance}">
+  <label>Overtime Hours — paid at ₹${r.overtimeRate||0} / hour</label><input type="number" step="0.5" id="pOT" value="${r.overtimeHours||0}">
   <label>Late Deduction (₹) — ${r.lateDays} late days (${r.chargeableLate} chargeable)</label><input type="number" id="pLate" value="${r.lateDeduction}">
   <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
   <button class="btn btn-p" onclick="savePayout(${i},'Draft',this)">Save Draft</button>
@@ -1442,7 +1443,7 @@ async function savePayout(i,status,btn){
   const r=S.cache.payout.rows[i];
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   try{
-    await api('savePayout',{month:r.month,email:r.email,basicSalary:$('#pBasic').value,advance:$('#pAdv').value,lateDeduction:$('#pLate').value,status});
+    await api('savePayout',{month:r.month,email:r.email,basicSalary:$('#pBasic').value,advance:$('#pAdv').value,overtimeHours:$('#pOT').value,lateDeduction:$('#pLate').value,status});
     closeModal(); toast('Payout saved ('+status+') ✅','ok'); renderPayout();
   }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save'; }
 }
@@ -1466,6 +1467,7 @@ function payslip(i){
       <tr><td style="padding:5px 0">Basic Salary</td><td style="text-align:right">${INR(r.basicSalary)}</td></tr>
       <tr><td style="padding:5px 0">Per-Day Rate</td><td style="text-align:right">${INR(r.perDay)}</td></tr>
       <tr><td style="padding:5px 0">Gross Earned (${r.payableDays} × ${INR(r.perDay)})</td><td style="text-align:right">${INR(r.gross)}</td></tr>
+      ${r.overtimeAmount?`<tr><td style="padding:5px 0">Overtime (${r.overtimeHours} hrs × ${INR(r.overtimeRate)})</td><td style="text-align:right">+ ${INR(r.overtimeAmount)}</td></tr>`:''}
       <tr><td style="padding:5px 0;color:#c00">Advance Salary</td><td style="text-align:right;color:#c00">− ${INR(r.advance)}</td></tr>
       <tr><td style="padding:5px 0;color:#c00">Late Deduction (${r.lateDays} late)</td><td style="text-align:right;color:#c00">− ${INR(r.lateDeduction)}</td></tr>
       <tr><td style="padding:12px 0;font-size:17px;font-weight:800;border-top:2px solid #0f1420">NET PAYABLE</td>
@@ -1477,8 +1479,8 @@ function payslip(i){
 }
 function exportPayoutCSV(){
   const d=S.cache.payout;
-  const head=['Month','Code','Name','Total Days','Working Days','Absent','Half Days','Paid Leave','Week Off','Festival','Payable Days','Basic','Per Day','Gross','Advance','Late Days','Late Deduction','Net Payable'];
-  const csv=[head.join(',')].concat(d.rows.map(r=>[r.month,r.code,`"${r.name}"`,r.totalDays,r.workingDays,r.absent,r.halfDays,r.paidLeave,r.weekOff,r.festival,r.payableDays,r.basicSalary,r.perDay,r.gross,r.advance,r.lateDays,r.lateDeduction,r.net].join(','))).join('\n');
+  const head=['Month','Code','Name','Total Days','Working Days','Absent','Half Days','Paid Leave','Week Off','Festival','Payable Days','Basic','Per Day','Gross','Overtime Hours','Overtime Amount','Advance','Late Days','Late Deduction','Net Payable'];
+  const csv=[head.join(',')].concat(d.rows.map(r=>[r.month,r.code,`"${r.name}"`,r.totalDays,r.workingDays,r.absent,r.halfDays,r.paidLeave,r.weekOff,r.festival,r.payableDays,r.basicSalary,r.perDay,r.gross,r.overtimeHours,r.overtimeAmount,r.advance,r.lateDays,r.lateDeduction,r.net].join(','))).join('\n');
   dl(csv,'payout_'+d.month+'.csv');
 }
 
