@@ -1413,15 +1413,15 @@ async function renderPayout(){
     <thead><tr><th>Employee</th><th>Days P/A/H</th><th>Payable Days</th><th>Basic</th><th>Per Day</th><th>Gross</th><th>Advance</th><th>Late Ded.</th><th>Net Payable</th><th></th></tr></thead>
     <tbody>${d.rows.map((r,i)=>`<tr>
       <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)} ${r.saved?'· <b style="color:var(--goodtext)">saved</b>':''}</div></div></div></td>
-      <td class="num">${r.workingDays-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
-      <td class="num"><b>${r.payableDays}</b> / ${r.totalDays}</td>
+      <td class="num">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
+      <td class="num"><b>${r.payableDays}</b> / ${r.elapsedDays||r.totalDays}</td>
       <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
       <td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
       <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
       <button class="btn btn-o btn-sm" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
-  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Total Days − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
+  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Absent − Half Days × 0.5'} (SOP Section 12)</p>`;
 }
 function payModal(i){
   const r=S.cache.payout.rows[i];
