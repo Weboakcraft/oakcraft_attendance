@@ -1416,7 +1416,7 @@ async function renderPayout(){
       <td class="num">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
       <td class="num"><b>${r.payableDays}</b> / ${r.elapsedDays||r.totalDays}</td>
       <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
-      <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
+      <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}${(r.overtimeOverride===''||r.overtimeOverride==null)?' (auto)':' (manual)'}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
       <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
@@ -1433,7 +1433,7 @@ function payModal(i){
   </div>
   <label>Basic Salary</label><input type="number" id="pBasic" value="${r.basicSalary}">
   <label>Advance Salary (will be deducted)</label><input type="number" id="pAdv" value="${r.advance}">
-  <label>Overtime Hours — paid at ₹${r.overtimeRate||0} / hour</label><input type="number" step="0.5" id="pOT" value="${r.overtimeHours||0}">
+  <label>Overtime Hours — auto ${r.autoOvertimeHours||0} hrs from punches · ₹${r.overtimeRate||0}/hr on a ${r.shiftHours||0} hr shift · leave blank to use auto</label><input type="number" step="0.25" id="pOT" placeholder="auto: ${r.autoOvertimeHours||0}" value="${(r.overtimeOverride===''||r.overtimeOverride==null)?'':r.overtimeOverride}">
   <label>Late Deduction (₹) — ${r.lateDays} late days (${r.chargeableLate} chargeable)</label><input type="number" id="pLate" value="${r.lateDeduction}">
   <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
   <button class="btn btn-p" onclick="savePayout(${i},'Draft',this)">Save Draft</button>
