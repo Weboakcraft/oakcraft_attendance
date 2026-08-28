@@ -1,0 +1,73 @@
+name: Unpack project zip
+
+# One-time helper. Put the project .zip in the repository root, run this from the
+# Actions tab, and it puts every file where it belongs and deletes the zip again.
+# Delete this file once it has done its job.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    name: Unpack the zip into the repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack
+        run: |
+          set -euo pipefail
+
+          ZIP="$(ls -1 ./*.zip 2>/dev/null | head -1 || true)"
+          if [ -z "$ZIP" ]; then
+            echo "::error::No .zip file found in the repository root. Upload the project zip first."
+            exit 1
+          fi
+          echo "Found $ZIP"
+
+          rm -rf /tmp/unpacked && mkdir -p /tmp/unpacked
+          unzip -q -o "$ZIP" -d /tmp/unpacked
+
+          # if the zip wraps everything in one folder, step inside it
+          SRC=/tmp/unpacked
+          if [ "$(ls -A "$SRC" | wc -l)" = "1" ] && [ -d "$SRC/$(ls -A "$SRC")" ]; then
+            SRC="$SRC/$(ls -A "$SRC")"
+          fi
+
+          if [ ! -f "$SRC/index.html" ] || [ ! -d "$SRC/android" ]; then
+            echo "::error::This does not look like the Oakcraft project zip (index.html / android/ missing)."
+            exit 1
+          fi
+
+          # a signing key or secrets file must never land in the repository
+          find "$SRC" \( -iname '*.jks' -o -iname '*.keystore' -o -iname '*SIGNING-KEY*' \) -print -delete || true
+
+          # GITHUB_TOKEN is not allowed to write .github/workflows - those two files
+          # are uploaded by hand afterwards
+          rm -rf "$SRC/.github"
+
+          cp -a "$SRC"/. .
+          rm -f "$ZIP"
+
+          echo "### Unpacked" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git status --porcelain | sed 's/^/  /' | head -80 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Changed files: $(git status --porcelain | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to commit - the repository already matches the zip."
+            exit 0
+          fi
+          git commit -m "Unpack Oakcraft Attendance update from zip"
+          git push
