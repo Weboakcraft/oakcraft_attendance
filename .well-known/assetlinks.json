@@ -1,13 +1,11 @@
 [
   {
-    "relation": [
-      "delegate_permission/common.handle_all_urls"
-    ],
+    "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
       "package_name": "in.oakcraft.attendance",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_SHA256_FINGERPRINT_FROM_PWABUILDER"
+        "35:9C:1F:5B:93:36:90:2A:3C:34:57:5B:28:A9:9A:5E:A0:66:36:86:1B:A7:20:61:62:3A:A5:8A:32:53:C2:78"
       ]
     }
   }

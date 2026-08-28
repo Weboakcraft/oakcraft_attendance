@@ -25,7 +25,7 @@
 :root{
   color-scheme: light;
   --bg:#f4f5f7; --surface:#ffffff; --surface2:#f9f9f7;
-  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#6b6a64;   /* was #898781 - only 3.3:1, failed contrast */
   --line:#e1e0d9; --hairline:rgba(11,11,11,.08);
   --brand:#0f1420; --brand2:#1c2536; --gold:#e8b34b; --gold2:#c9962f;
   --blue:#2a78d6; --aqua:#1baf7a; --yellow:#eda100; --red:#e34948; --violet:#4a3aa7; --orange:#eb6834;
@@ -47,7 +47,7 @@
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.45}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;min-height:100dvh;font-size:15px;line-height:1.45}
 button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
 input,select,textarea{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;width:100%;outline:none;transition:border-color .15s, box-shadow .15s}
 input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,120,214,.15)}
@@ -68,8 +68,8 @@ h1,h2,h3{letter-spacing:-.02em}
 .login-err{margin-top:16px;color:#ffb4b4;font-size:13px;background:rgba(227,73,72,.12);border:1px solid rgba(227,73,72,.3);border-radius:10px;padding:10px;display:none}
 
 /* ---------- APP SHELL ---------- */
-#app{display:none;min-height:100vh}
-.shell{display:flex;min-height:100vh}
+#app{display:none;min-height:100vh;min-height:100dvh}
+.shell{display:flex;min-height:100vh;min-height:100dvh}
 .sidebar{width:236px;background:linear-gradient(180deg,var(--brand) 0%,#0b0f19 100%);color:#fff;position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column;padding:22px 14px calc(16px + var(--sab));z-index:40}
 .side-brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px}
 .side-brand .logo-mark{width:38px;height:38px;border-radius:11px;margin:0;font-size:19px}
@@ -115,7 +115,9 @@ h1,h2,h3{letter-spacing:-.02em}
 .btn-good{background:var(--good);color:#fff}
 .btn-good:hover{filter:brightness(1.08);transform:translateY(-1px)}
 .btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
-.btn-sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
+.btn-sm{padding:7px 12px;font-size:12.5px;border-radius:9px;min-height:36px}
+/* icon-only actions need a real touch target - approve/reject used to be 28px */
+.btn-ic{min-width:44px;min-height:44px;padding:0 10px;font-size:16px;border-radius:11px}
 .chip{display:inline-flex;align-items:center;gap:5px;padding:3.5px 10px;border-radius:99px;font-size:11.5px;font-weight:700;white-space:nowrap}
 .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .c-present{background:rgba(12,163,12,.12);color:var(--goodtext)}
@@ -283,6 +285,13 @@ const CONFIG = {
 let S = { token:null, profile:null, today:null, leaveTypes:[], view:'dashboard', month:new Date().toISOString().slice(0,7), cache:{} };
 const $ = s => document.querySelector(s);
 const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* esc() is for TEXT. Putting esc() output inside an inline onclick was wrong:
+   the HTML parser turns &#39; back into a real quote BEFORE the JavaScript is
+   parsed, so a holiday or employee name containing a quote broke out of the
+   string. jsArg() builds a proper JS literal first and only then escapes it for
+   a double-quoted attribute. Handlers using it must be delimited with ". */
+const jsArg = v => JSON.stringify(v === undefined ? null : v)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const INITIALS = n => String(n||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 const MONTH_NAME = m => new Date(m+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
 /* ---------- Time helpers ----------
@@ -358,7 +367,14 @@ method:'POST', redirect:'follow', signal: ctl.signal,
 headers:{'Content-Type':'text/plain;charset=utf-8'},
 body: JSON.stringify({ action, idToken:tok, payload })
 });
-const j = await res.json();
+/* Apps Script answers a crash with an HTML error page, not JSON. Without this
+   the JSON parse blew up and every single failure was reported to the user as
+   "Network error", which sent people hunting for a connection problem that was
+   not there. */
+if(!res.ok){ const e=new Error('Server error '+res.status+' — the backend script may need re-deploying.'); e.ocHandled=1; throw e; }
+let j;
+try{ j = await res.json(); }
+catch(pe){ const e=new Error('The server sent something we could not read. If this keeps happening, re-deploy the Apps Script.'); e.ocHandled=1; throw e; }
 /* The backend hands back a fresh 90-day app session token whenever one is due.
    Saving it here is what turns the login into a genuine one-time login. */
 if(j && j.session){
@@ -366,6 +382,7 @@ if(j && j.session){
 }
 return j;
 }catch(e){
+if(e && e.ocHandled) throw e;
 throw new Error(e && e.name==='AbortError' ? 'Server is taking too long — please try again.' : 'Network error — check your connection.');
 }finally{ clearTimeout(kill); }
 }
@@ -625,6 +642,7 @@ function toggleTheme(){ const cur = document.documentElement.getAttribute('data-
 
 function ocPaint(d, quiet){
 S.profile=d.profile; S.today=d.today; S.leaveTypes=d.leaveTypes||[]; S.geofence=d.geofence||null;
+S.caps = d.caps || {};   /* caps.clientTime = the backend records the time WE send, not arrival time */
 ocApplyRoleStorage(S.profile && S.profile.role);
 ocResumeDone();
 $('#loginErr').style.display='none';
@@ -668,6 +686,7 @@ async function doRequestAccess(btn){
 
 /* ================= NAV ================= */
 const IC = {
+  more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
   dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   punch:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
   rep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>',
@@ -691,17 +710,39 @@ function navItems(){
 function buildNav(){
   const items = navItems();
   $('#sideNav').innerHTML = items.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}${i.t}</button>`).join('');
-  const mob = items.slice(0,5);
-  $('#bottomNav').innerHTML = mob.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}<span>${i.t}</span></button>`).join('');
+  /* The bottom bar has room for five buttons. A role with more screens than that
+     used to lose the extras entirely on a phone - Admin could not reach Payout or
+     Settings at all. Now the fifth slot becomes "More". */
+  const fits = items.length <= 5;
+  const mob = fits ? items : items.slice(0, 4);
+  OC_MORE = fits ? [] : items.slice(4);
+  let navHtml = mob.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}<span>${i.t}</span></button>`).join('');
+  if(!fits) navHtml += `<button data-v="__more" aria-label="More screens" onclick="ocMoreMenu()">${IC.more}<span>More</span></button>`;
+  $('#bottomNav').innerHTML = navHtml;
   $('#sbName').textContent = S.profile.name;
   $('#sbRole').textContent = S.profile.role + ' · ' + S.profile.code;
   $('#sbAvatar').textContent = INITIALS(S.profile.name);
 }
+var OC_MORE = [];
+function ocMoreMenu(){
+  if(!OC_MORE.length) return;
+  modal(`<h3 style="margin:0 0 14px">More</h3>
+    <div style="display:grid;gap:10px">
+      ${OC_MORE.map(i=>`<button class="btn ghost" style="justify-content:flex-start;gap:12px;height:52px;font-size:15px"
+        onclick="closeModal();go('${i.id}')">${i.ic}${i.t}</button>`).join('')}
+    </div>
+    <div class="mrow" style="margin-top:16px"><button class="btn ghost" onclick="closeModal()">Cancel</button></div>`);
+}
 function go(v){
   S.view=v;
   document.querySelectorAll('[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
+  /* a screen that lives behind "More" still lights the More button up */
+  const moreBtn = document.querySelector('#bottomNav [data-v="__more"]');
+  if(moreBtn) moreBtn.classList.toggle('active', !document.querySelector('#bottomNav [data-v="'+v+'"]'));
   stopCam(); stopGPS();
-  ({dashboard:renderDashboard,punch:renderPunch,reports:renderReports,leave:renderLeave,users:renderUsers,payout:renderPayout,settings:renderSettings})[v]();
+  const R = {dashboard:renderDashboard,punch:renderPunch,reports:renderReports,leave:renderLeave,users:renderUsers,payout:renderPayout,settings:renderSettings}[v];
+  if(typeof R !== 'function'){ S.view='dashboard'; return go('dashboard'); }
+  R();
 }
 function loadingView(msg){ $('#main').innerHTML = `<div class="loading-view"><div class="spin dark" style="width:26px;height:26px"></div>${msg||'Loading…'}</div>`; }
 function toast(msg, type=''){ const t=$('#toast'); t.className='toast '+type; t.textContent=msg; t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none', 3500); }
@@ -718,8 +759,40 @@ const monthPicker = (oninput) => `<input type="month" class="month-in" value="${
 
 /* ================= CHARTS (inline SVG) ================= */
 const CHART_COLORS = { Present:'var(--good)', Working:'var(--blue)', 'Half Day':'var(--warn)', Absent:'var(--crit)', 'Paid Leave':'var(--violet)', Off:'var(--muted)' };
-function tipShow(e, text){ const t=$('#barTip'); t.textContent=text; t.style.display='block'; t.style.left=Math.min(e.clientX+12, innerWidth-170)+'px'; t.style.top=(e.clientY-14)+'px'; }
-function tipHide(){ $('#barTip').style.display='none'; }
+function tipShow(e, text){ const t=$('#barTip'); if(!t) return; t.textContent=text; t.style.display='block'; t.style.left=Math.min(e.clientX+12, innerWidth-170)+'px'; t.style.top=(e.clientY-14)+'px'; }
+function ocTipHideNow(){ const t=$('#barTip'); if(t) t.style.display='none'; }
+/* A tap also fires the mouse-compatibility events, so the element's own
+   onmouseleave used to hide the tooltip in the same gesture that opened it.
+   Right after a touch, mouse-driven hides are ignored. */
+var ocTipTouchUntil = 0, ocTipTimer = null;
+function tipHide(){ if(Date.now() < ocTipTouchUntil) return; ocTipHideNow(); }
+/* Charts and the calendar only ever listened for mousemove, so on a phone - the
+   only place this app really lives - no tooltip ever appeared. Rather than edit
+   every chart, replay the touch onto whatever inline handler is already there. */
+document.addEventListener('touchstart', function(ev){
+  clearTimeout(ocTipTimer);
+  let n = ev.target;
+  while(n && n !== document && !n.onmousemove) n = n.parentNode;
+  if(n && n.onmousemove && ev.touches[0]){
+    const t = ev.touches[0];
+    ocTipTouchUntil = Date.now() + 2600;
+    try{ n.onmousemove.call(n, {clientX:t.clientX, clientY:t.clientY, target:n}); }catch(e){}
+  } else {
+    ocTipTouchUntil = 0;
+    ocTipHideNow();
+  }
+}, {passive:true});
+document.addEventListener('touchend', function(){
+  clearTimeout(ocTipTimer);
+  ocTipTimer = setTimeout(ocTipHideNow, 2500);
+}, {passive:true});
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){
+    const bg = document.getElementById('modalBg');
+    if(bg && bg.classList.contains('open')) closeModal();
+    else tipHide();
+  }
+});
 
 function hoursBarChart(trend, fullDay){
   // employee's daily hours — bars with a full-day threshold line
@@ -841,7 +914,7 @@ async function renderDashboard(){
   }
   $('#main').innerHTML = html;
 }
-function tile(k,v,s,color){ return `<div class="tile"><div class="k"><span class="dot" style="background:${color}"></span>${k}</div><div class="v num">${v}</div><div class="s">${esc(s)}</div></div>`; }
+function tile(k,v,s,color){ return `<div class="tile"><div class="k"><span class="dot" style="background:${esc(color)}"></span>${esc(k)}</div><div class="v num">${esc(v)}</div><div class="s">${esc(s)}</div></div>`; }
 function teamTodayTable(rows){
   const work=rows.filter(r=>!['Week Off','Holiday','Festival Holiday'].includes(r.status));
   if(!work.length) return '<div class="empty">No records today</div>';
@@ -863,6 +936,10 @@ function haversineM(la1,lo1,la2,lo2){ const R=6371000,r=Math.PI/180,dLa=(la2-la1
 function stopCam(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
 async function renderPunch(){
   const t=S.today||{};
+  /* The canvas is rebuilt empty every time this screen is drawn, so a selfie left
+     over from a previous visit would enable the punch button with nothing on
+     screen to show for it. */
+  cam.photo=null; stopCam();
   const nextType = !t.punchedIn ? 'Punch In' : 'Punch Out';
   const staff = needPhoto();
   const camCard = staff ? `
@@ -913,10 +990,21 @@ async function startCam(){
     cam.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
     $('#camVideo').srcObject=cam.stream; $('#camVideo').style.display='block';
     $('#camOff').style.display='none'; $('#camStartBtn').style.display='none'; $('#camSnapBtn').style.display='inline-flex';
-  }catch(e){ toast('Camera access denied — please allow browser permission','err'); }
+    return true;
+  }catch(e){
+    toast('Camera access denied — please allow browser permission','err');
+    /* put the screen back the way it was, so the person is not left staring at a
+       Take Selfie button with no camera behind it */
+    const off=$('#camOff'), start=$('#camStartBtn'), snapB=$('#camSnapBtn');
+    if(off) off.style.display='';
+    if(start) start.style.display='inline-flex';
+    if(snapB) snapB.style.display='none';
+    return false;
+  }
 }
 function snap(){
   const v=$('#camVideo'), c=$('#camCanvas');
+  if(!v || !v.videoWidth){ toast('Camera is still starting — try again in a second','err'); return; }
   const w=Math.min(640, v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
   c.width=w; c.height=h;
   c.getContext('2d').drawImage(v,0,0,w,h);
@@ -925,7 +1013,13 @@ function snap(){
   $('#camSnapBtn').style.display='none'; $('#camRetakeBtn').style.display='inline-flex';
   checkReady();
 }
-function retake(){ cam.photo=null; $('#camCanvas').style.display='none'; $('#camRetakeBtn').style.display='none'; $('#camStartBtn').style.display='none'; startCam(); $('#camSnapBtn').style.display='inline-flex'; checkReady(); }
+async function retake(){
+  cam.photo=null;
+  $('#camCanvas').style.display='none';
+  $('#camRetakeBtn').style.display='none';
+  checkReady();
+  await startCam();   /* startCam puts the right buttons back either way */
+}
 /* ================= LOCATION — robust multi-stage GPS =================
    PURANI PROBLEM: sirf ek getCurrentPosition({enableHighAccuracy:true, timeout:15000}).
    Andar baithe employee ko 15 sec me satellite fix nahi milta -> TIMEOUT -> permanent
@@ -1015,9 +1109,14 @@ function checkReady(){
 async function doPunch(){
   const b=$('#punchBtn'); b.disabled=true; b.innerHTML='<span class="spin"></span> Saving…';
   try{
-    const r = await api('punch', {photoBase64:cam.photo, lat:cam.pos.lat, lng:cam.pos.lng, accuracy:cam.pos.accuracy, device:navigator.userAgent.slice(0,110)});
+    const r = await api('punch', {photoBase64:cam.photo, lat:cam.pos.lat, lng:cam.pos.lng, accuracy:cam.pos.accuracy,
+      device:navigator.userAgent.slice(0,110),
+      /* sent on every punch. A backend that ignores them loses nothing; one that
+         honours them can accept a punch that was taken offline and uploaded later,
+         and can throw away a duplicate arriving with the same clientId. */
+      clientTime: new Date().toISOString(), clientId: 'pn_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)});
     toast(`✅ ${r.type} saved — ${fmtT(r.time)}`, 'ok');
-    const d = await api('init'); S.today=d.today; cam.photo=null;
+    const d = await api('init', {}, {fresh:true}); S.today=d.today; cam.photo=null;
     renderPunch();
   }catch(e){ toast(e.message,'err'); b.disabled=false; b.innerHTML='Punch'; }
 }
@@ -1169,7 +1268,14 @@ function drawReports(){
     <td>${r.photoIn?`<a href="${esc(r.photoIn)}" target="_blank" title="Selfie">📷</a>`:''} ${r.mapIn?`<a href="${esc(r.mapIn)}" target="_blank" title="Location">📍</a>`:''}</td>
   </tr>`).join(''):'<tr><td colspan="8"><div class="empty">No records found</div></td></tr>'}</tbody>`;
 }
-function csvCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function csvCell(v){
+  v = (v==null ? '' : String(v));
+  /* A cell that opens with = + - @ (or a tab / CR) is executed as a formula by
+     Excel and Sheets. An employee called "=cmd|..." would otherwise run on
+     whoever opens the export, so the value is pinned as text. */
+  if(/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+  return /[",\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+}
 function repFileTag(){
   const who=repFilter.emp ? repFilter.emp.trim().replace(/[^A-Za-z0-9]+/g,'_') : 'all_employees';
   return who+'_'+(repFilter.span==='range' ? repFilter.from+'_to_'+repFilter.to : S.month);
@@ -1183,7 +1289,13 @@ function exportReportsCSV(){
   const csv=[head.join(',')].concat(rows.map(r=>[r.date,r.name,r.code,fmtTx(r.timing),fmtTx(r.punchIn)||'',fmtTx(r.punchOut)||'',r.hours??'',r.status,r.late?'Yes':'',r.leaveType||''].map(csvCell).join(','))).join('\n');
   dl(csv,'attendance_report_'+repFileTag()+'.csv');
 }
-function dl(text,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'})); a.download=name; a.click(); }
+function dl(text,name){
+  const url = URL.createObjectURL(new Blob(['\ufeff'+text], {type:'text/csv;charset=utf-8'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);   /* the old code leaked every export */
+}
 
 /* ================= LEAVE ================= */
 async function renderLeave(){
@@ -1205,8 +1317,8 @@ async function renderLeave(){
       <td style="white-space:normal;max-width:220px">${esc(l.remarks||'—')}</td>
       <td><span class="chip ${cls}">${esc(st)}</span></td>
       ${isHR?`<td>${st.toLowerCase()==='pending'||st===''?`
-        <button class="btn btn-good btn-sm" onclick="decideLeave('${l.id}','Approved')">✓</button>
-        <button class="btn btn-danger btn-sm" onclick="decideLeave('${l.id}','Rejected')">✗</button>`:(esc(l.approvedBy||''))}</td>`:''}</tr>`;
+        <button class="btn btn-good btn-ic" title="Approve" aria-label="Approve this leave" onclick="decideLeave(${jsArg(l.id)},'Approved')">✓</button>
+        <button class="btn btn-danger btn-ic" title="Reject" aria-label="Reject this leave" onclick="decideLeave(${jsArg(l.id)},'Rejected')">✗</button>`:(esc(l.approvedBy||''))}</td>`:''}</tr>`;
     }).join(''):`<tr><td colspan="8"><div class="empty"><div class="ic">🌴</div>No leave records</div></td></tr>`}</tbody></table></div>`;
 }
 function leaveModal(){
@@ -1241,7 +1353,7 @@ async function renderUsers(){
     <div class="chart-sub">New users who signed in with Gmail and requested access — add them so they can log in</div>
     <div class="timeline">${reqs.map(r=>`<div class="ti"><span class="tdot" style="background:var(--gold)"></span>
       <div style="flex:1"><div class="tt">${esc(r.name||r.email)}</div><div class="ty">${esc(r.email)}${r.phone?' · '+esc(r.phone):''}</div></div>
-      <button class="btn btn-good btn-sm" onclick='addFromRequest(${JSON.stringify(r).replace(/'/g,"&#39;")})'>+ Add</button></div>`).join('')}</div></div>` : '';
+      <button class="btn btn-good btn-sm" onclick="addFromRequest(${jsArg(r)})">+ Add</button></div>`).join('')}</div></div>` : '';
   $('#main').innerHTML=`
   <div class="topbar"><div><h2>Employees</h2><div class="sub">User master — ${d.users.length} employees (${d.users.filter(u=>String(u.status).toLowerCase()==='active').length} active)</div></div>
   <div class="top-actions"><input class="searchbox" placeholder="🔍 Search…" oninput="drawUsers(this.value)">
@@ -1261,7 +1373,7 @@ function drawUsers(q){
     <td class="num">#${esc(u.code)}</td><td class="num">${fmtT(u.timing)}</td><td>${esc(u.type)}</td>
     <td>${esc(u.role)}</td><td>${esc(u.department||'—')}</td><td>${esc(u.weekOffDay)}</td>
     <td><span class="chip ${String(u.status).toLowerCase()==='active'?'c-approved':'c-rejected'}">${esc(u.status)}</span></td>
-    <td><button class="btn btn-o btn-sm" onclick='userModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Edit</button></td></tr>`).join('')}</tbody>`;
+    <td><button class="btn btn-o btn-sm" onclick="userModal(${jsArg(u)})">Edit</button></td></tr>`).join('')}</tbody>`;
 }
 function userModal(u){
   const isAdmin=S.profile.role==='Admin';
@@ -1321,10 +1433,7 @@ function importModal(){
 function impTemplate(){
   var nl=String.fromCharCode(10);
   var csv=IMP_COLS.join(',')+nl+'Ravi Kumar,ravi@oakcraft.in,OC010,09:30,Staff,Active,Employee,Sales,Executive,20000,Sunday'+nl;
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='employee_import_template.csv';
-  document.body.appendChild(a); a.click(); a.remove();
+  dl(csv, 'employee_import_template.csv');
 }
 function impLib(){
   return new Promise(function(res,rej){
@@ -1421,7 +1530,7 @@ async function renderPayout(){
       <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
-      <button class="btn btn-o btn-sm" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
+      <button class="btn btn-o btn-ic" title="Payslip" aria-label="Open payslip" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
   <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Chargeable Absent − Chargeable Half × 0.5 (Staff: 1 paid leave carried forward + 1 paid half day per month)'} (SOP Section 12)</p>`;
 }
 function payModal(i){
@@ -1481,7 +1590,7 @@ function payslip(i){
 function exportPayoutCSV(){
   const d=S.cache.payout;
   const head=['Month','Code','Name','Total Days','Working Days','Absent','Half Days','Paid Leave','Week Off','Festival','Payable Days','Basic','Per Day','Gross','Overtime Hours','Overtime Amount','Advance','Late Days','Late Deduction','Net Payable'];
-  const csv=[head.join(',')].concat(d.rows.map(r=>[r.month,r.code,`"${r.name}"`,r.totalDays,r.workingDays,r.absent,r.halfDays,r.paidLeave,r.weekOff,r.festival,r.payableDays,r.basicSalary,r.perDay,r.gross,r.overtimeHours,r.overtimeAmount,r.advance,r.lateDays,r.lateDeduction,r.net].join(','))).join('\n');
+  const csv=[head.map(csvCell).join(',')].concat(d.rows.map(r=>[r.month,r.code,r.name,r.totalDays,r.workingDays,r.absent,r.halfDays,r.paidLeave,r.weekOff,r.festival,r.payableDays,r.basicSalary,r.perDay,r.gross,r.overtimeHours,r.overtimeAmount,r.advance,r.lateDays,r.lateDeduction,r.net].map(csvCell).join(','))).join('\n');
   dl(csv,'payout_'+d.month+'.csv');
 }
 
@@ -1518,7 +1627,7 @@ async function renderSettings(){
       <div class="modal-foot" style="justify-content:flex-start"><button class="btn btn-gold" onclick="addHoliday(this)">+ Add Holiday</button></div>
       <div class="timeline" style="margin-top:14px">${h.map(x=>`<div class="ti"><span class="tdot" style="background:var(--violet)"></span>
         <div><div class="tt">${fmtDW(x.date)}</div><div class="ty">${esc(x.name)} · ${esc(x.type)}</div></div>
-        <button class="btn btn-o btn-sm" style="margin-left:auto" onclick="delHoliday('${x.date}','${esc(x.name)}')">🗑</button></div>`).join('')||'<div class="empty" style="padding:16px">No holidays</div>'}</div>
+        <button class="btn btn-o btn-ic" style="margin-left:auto" title="Delete holiday" aria-label="Delete this holiday" onclick="delHoliday(${jsArg(x.date)},${jsArg(x.name)})">🗑</button></div>`).join('')||'<div class="empty" style="padding:16px">No holidays</div>'}</div>
     </div>
   </div>
   <div class="card" style="margin-top:16px"><h3>🛡️ Audit Log</h3><div class="chart-sub">Recent activity — who is changing what (full history in the Audit sheet)</div>
@@ -1550,8 +1659,24 @@ var OC_INFLIGHT = {};
 var OC_RERENDERED = {};
 function ocKey(a,p){ try{ return 'occ:'+a+':'+JSON.stringify(p||{}); }catch(e){ return 'occ:'+a; } }
 function ocGet(k){ try{ var v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } }
-function ocSet(k,d){ try{ localStorage.setItem(k, JSON.stringify({t:Date.now(), d:d})); }catch(e){ ocTrim(); } }
-function ocTrim(){ try{ Object.keys(localStorage).forEach(function(k){ if(k.indexOf('occ:')===0) localStorage.removeItem(k); }); }catch(e){} }
+function ocSet(k,d){
+  try{ localStorage.setItem(k, JSON.stringify({t:Date.now(), d:d})); }
+  catch(e){ ocTrim(); try{ localStorage.setItem(k, JSON.stringify({t:Date.now(), d:d})); }catch(e2){} }
+}
+/* Dropping the whole cache on one quota error threw away every screen's offline
+   copy. Evict the oldest entries instead, and never touch the outbox. */
+function ocTrim(){
+  try{
+    var rows=[];
+    Object.keys(localStorage).forEach(function(k){
+      if(k.indexOf('occ:')!==0) return;
+      var t=0; try{ t=(JSON.parse(localStorage.getItem(k))||{}).t||0; }catch(e){}
+      rows.push([k,t]);
+    });
+    rows.sort(function(a,b){ return a[1]-b[1]; });
+    rows.slice(0, Math.max(1, Math.ceil(rows.length/3))).forEach(function(r){ localStorage.removeItem(r[0]); });
+  }catch(e){}
+}
 function ocAge(t){
   var m=Math.round((Date.now()-t)/60000);
   if(m<1) return 'just now';
@@ -1569,6 +1694,64 @@ function ocBanner(show,msg){
   if(msg) el.textContent=msg;
   el.style.display = show ? 'block' : 'none';
 }
+/* ============ OUTBOX — writes attempted with no signal ============
+   applyLeave carries its own dates, so uploading it late changes nothing.
+   punch is different: the backend stamps the moment the request arrives, so a
+   punch queued at 9:30 and uploaded at 11:00 would be recorded at 11:00 — wrong
+   attendance. It is therefore queued ONLY once the backend tells us (via
+   caps.clientTime) that it uses the time the app sends. Until then an offline
+   punch is refused, with a message that says why. */
+var OC_OUTBOX_KEY = 'oc_outbox';
+function ocQueueable(action){
+  if(action === 'applyLeave') return true;
+  if(action === 'punch') return !!(typeof S === 'object' && S && S.caps && S.caps.clientTime);
+  return false;
+}
+function ocOutbox(){ try{ return JSON.parse(localStorage.getItem(OC_OUTBOX_KEY) || '[]'); }catch(e){ return []; } }
+function ocOutboxSave(l){ try{ localStorage.setItem(OC_OUTBOX_KEY, JSON.stringify(l)); }catch(e){} }
+function ocOutboxAdd(action, payload){
+  var l = ocOutbox();
+  if(l.length >= 40) return false;
+  l.push({ id:'ob_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), action:action, payload:payload, at:Date.now() });
+  ocOutboxSave(l); ocOutboxBanner(); return true;
+}
+function ocOutboxBanner(){
+  var n = ocOutbox().length;
+  if(n) ocBanner(true, n + (n === 1 ? ' entry is' : ' entries are') + ' saved on this phone and waiting to send');
+  else if(navigator.onLine) ocBanner(false);
+}
+var ocFlushing = false;
+async function ocOutboxFlush(){
+  if(ocFlushing || !navigator.onLine) return;
+  var l = ocOutbox();
+  if(!l.length) return;
+  ocFlushing = true;
+  var sent = 0, refused = [];
+  try{
+    while(l.length){
+      var item = l[0];
+      try{
+        await window.api(item.action, item.payload);
+        sent++; l.shift(); ocOutboxSave(l);
+      }catch(e){
+        var m = String((e && e.message) || e);
+        /* still no usable connection - leave it queued and try again later */
+        if(/Network error|taking too long|offline/i.test(m)) break;
+        /* the backend actively refused it; retrying forever would never help */
+        refused.push(item.action + ' — ' + m);
+        l.shift(); ocOutboxSave(l);
+      }
+    }
+  } finally {
+    ocFlushing = false;
+    ocOutboxBanner();
+    if(sent) { toast(sent + (sent === 1 ? ' saved entry has' : ' saved entries have') + ' been sent ✅', 'ok'); ocRerender(); }
+    if(refused.length) toast('Could not send: ' + refused[0], 'err');
+  }
+}
+window.addEventListener('online', function(){ setTimeout(ocOutboxFlush, 600); });
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) ocOutboxFlush(); });
+
 function ocRerender(){
   try{ if(typeof go==='function' && typeof S==='object' && S && S.view) go(S.view); }catch(e){}
 }
@@ -1579,7 +1762,15 @@ function ocRerender(){
     var isRead = OC_READS.indexOf(action) >= 0;
     var offline = (navigator.onLine === false);
     if(!isRead){
-      if(offline) return Promise.reject(new Error('You are offline. This action needs an internet connection.'));
+      if(offline){
+        if(ocQueueable(action) && ocOutboxAdd(action, payload)){
+          setTimeout(function(){ toast('No signal — saved on this phone, it will be sent by itself','ok'); }, 60);
+          return Promise.resolve({queued:true});
+        }
+        return Promise.reject(new Error(action === 'punch'
+          ? 'No internet. A punch has to reach the server straight away so the time is recorded correctly.'
+          : 'You are offline. This action needs an internet connection.'));
+      }
       return ORIG(action, payload, opts);
     }
     var key = ocKey(action, payload);
@@ -1587,6 +1778,12 @@ function ocRerender(){
     if(offline){
       if(cached){ ocBanner(true, 'Offline — showing data from ' + ocAge(cached.t)); return Promise.resolve(cached.d); }
       return Promise.reject(new Error('You are offline and no saved data is available for this screen.'));
+    }
+    /* opts.fresh skips the cache entirely. Needed straight after a write - the
+       punch screen used to redraw from the pre-punch snapshot and still say
+       "Punch In" after you had already punched in. */
+    if(opts && opts.fresh){
+      return ORIG(action, payload, opts).then(function(d){ ocSet(key, d); ocBanner(false); return d; });
     }
     var net = OC_INFLIGHT[key];
     if(!net){
@@ -1597,7 +1794,7 @@ function ocRerender(){
         ocBanner(false);
         if(cached && changed && !OC_RERENDERED[key] && OC_NORERENDER.indexOf(action) < 0){
           OC_RERENDERED[key] = 1;
-          setTimeout(ocRerender, 0);
+          setTimeout(function(){ delete OC_RERENDERED[key]; ocRerender(); }, 0);
         }
         return d;
       }, function(err){ delete OC_INFLIGHT[key]; throw err; });
@@ -1613,7 +1810,43 @@ function ocRerender(){
 window.addEventListener('online', function(){ ocBanner(false); ocRerender(); });
 window.addEventListener('offline', function(){ ocBanner(true, 'You are offline — showing saved data'); });
 if('serviceWorker' in navigator){
-  window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').then(function(reg){
+      if(!reg) return;
+      /* sw.js has always listened for a 'skipWaiting' message and nothing ever
+         sent one, so a new version sat waiting until every tab was closed. */
+      function offer(w){
+        if(!w) return;
+        w.addEventListener('statechange', function(){
+          if(w.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar(w);
+        });
+      }
+      if(reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+      reg.addEventListener('updatefound', function(){ offer(reg.installing); });
+    }).catch(function(){});
+    var reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function(){
+      if(reloading) return; reloading = true; location.reload();
+    });
+    setTimeout(ocOutboxFlush, 1500);
+  });
+  function showUpdateBar(worker){
+    if(document.getElementById('ocUpdBar')) return;
+    var b = document.createElement('div');
+    b.id = 'ocUpdBar';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:320;background:#0f1420;color:#fff;border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;font-size:13.5px;box-shadow:0 18px 40px -14px rgba(0,0,0,.6)';
+    b.innerHTML = '<span style="flex:1">A newer version is ready</span>';
+    var go = document.createElement('button');
+    go.textContent = 'Update';
+    go.style.cssText = 'background:#e8b34b;color:#0f1420;border:0;border-radius:9px;padding:8px 14px;font-weight:700;min-height:36px';
+    go.onclick = function(){ try{ worker.postMessage('skipWaiting'); }catch(e){ location.reload(); } };
+    var later = document.createElement('button');
+    later.textContent = 'Later';
+    later.style.cssText = 'background:transparent;color:#c9c8c2;border:0;padding:8px 6px;min-height:36px';
+    later.onclick = function(){ b.remove(); };
+    b.appendChild(go); b.appendChild(later);
+    document.body.appendChild(b);
+  }
 }
 
 
@@ -1817,13 +2050,18 @@ function ocPrefetch(){
     var budget = Math.max(Number(ms) || 0, 30000);
     await slot();
     try {
+      /* Reads may be retried freely. A write must NOT be: a punch that timed out
+         on the way back has still been recorded, and sending it again produces a
+         duplicate punch, leave or payroll row. */
+      var isRead = (typeof OC_READS !== 'undefined') && OC_READS.indexOf(action) >= 0;
+      var tries = isRead ? 3 : 1;
       var last;
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < tries; i++) {
         try { return await RAW(action, payload, tok, budget); }
         catch (e) {
           last = e;
           if (/AUTH:|PERMISSION:|PUNCH:/i.test(String((e && e.message) || e))) throw e;
-          await nap(700 * Math.pow(2, i) + Math.floor(Math.random() * 500));
+          if (i + 1 < tries) await nap(700 * Math.pow(2, i) + Math.floor(Math.random() * 500));
         }
       }
       throw last;
@@ -1832,7 +2070,8 @@ function ocPrefetch(){
 
   var lastV = null, timer = null, busy = false;
   function currentView() {
-    var a = document.querySelector('[data-v].active');
+    if (typeof S === 'object' && S && S.view) return S.view;
+    var a = document.querySelector('#sideNav [data-v].active');
     return a ? a.getAttribute('data-v') : 'dashboard';
   }
   function dropReadCache() {

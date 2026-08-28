@@ -1,0 +1,70 @@
+// OakCraft Attendance - Trusted Web Activity.
+//
+// A TWA runs the site in Chrome's engine with no address bar, so Google Sign-In,
+// the selfie camera, GPS, CSV downloads and printing all behave exactly as they do
+// in the browser. A plain WebView cannot sign in at all - Google refuses OAuth in
+// embedded WebViews - which is why this is a TWA and not a WebView shell.
+
+plugins { id 'com.android.application' }
+
+def appVersionName = (project.findProperty('oakVersionName') ?: '1.0.0').toString()
+def appVersionCode = Integer.parseInt((project.findProperty('oakVersionCode') ?: '1').toString())
+def siteOrigin     = (project.findProperty('oakSiteOrigin') ?: 'https://weboakcraft.github.io').toString().replaceAll('/+$', '')
+def sitePath       = (project.findProperty('oakSitePath')   ?: '/oakcraft_attendance/').toString()
+def launchUrl      = siteOrigin + sitePath
+def siteHost       = siteOrigin.replaceFirst('^https?://', '')
+
+def ksPath      = (project.findProperty('oakKeystore') ?: System.getenv('OAK_KEYSTORE') ?: '').toString().trim()
+def hasKeystore = !ksPath.isEmpty() && file(ksPath).exists()
+
+android {
+    namespace 'com.oakcraft.attendance'   // code package. 'in' is a Java keyword, so it
+                                          // cannot be one - the app id below is unaffected.
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'in.oakcraft.attendance'
+        minSdk 21
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+
+        // Everything the Trusted Web Activity needs, in one place.
+        resValue 'string', 'launch_url', launchUrl
+        resValue 'string', 'site_host', siteHost
+        resValue 'string', 'site_path_prefix', sitePath
+        resValue 'string', 'asset_statements',
+            '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": {\\"namespace\\": \\"web\\", \\"site\\": \\"' + siteOrigin + '\\"}}]'
+    }
+
+    signingConfigs {
+        if (hasKeystore) {
+            release {
+                storeFile     file(ksPath)
+                storePassword (project.findProperty('oakKeystorePassword') ?: System.getenv('OAK_KEYSTORE_PASSWORD') ?: '').toString()
+                keyAlias      (project.findProperty('oakKeyAlias')        ?: System.getenv('OAK_KEY_ALIAS')        ?: 'oakcraft').toString()
+                keyPassword   (project.findProperty('oakKeyPassword')     ?: System.getenv('OAK_KEY_PASSWORD')     ?: '').toString()
+            }
+        }
+    }
+
+    buildTypes {
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasKeystore) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint { abortOnError false; checkReleaseBuilds false }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}
