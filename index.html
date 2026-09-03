@@ -212,10 +212,30 @@ td .who .em{font-size:11.5px;color:var(--muted)}
   #payslipArea{display:block;position:absolute;inset:0;padding:30px}
 }
 
+/* My Salary: breakdown table and tiles stack on a phone instead of clipping */
+.salary-tbl{min-width:0;font-size:13.5px}
+.salary-tbl td{white-space:normal;padding:9px 6px}
+.salary-tbl td:first-child{padding-left:0}
+.salary-tbl td:last-child{padding-right:0;white-space:nowrap}
+
+/* "More" sheet on the phone: the extra screens as a plain list. The icons used
+   to render at the SVG default of 300x150 because nothing sized them. */
+.more-list{display:grid;gap:10px}
+.more-list .btn{justify-content:flex-start;gap:12px;min-height:52px;font-size:15px}
+.more-list .btn svg{width:20px;height:20px;flex:none}
+
 /* ---------- MOBILE ---------- */
 .bottom-nav{display:none}
+.mob-head{display:none}
 @media (max-width: 960px){
   .sidebar{display:none}
+  .mob-head{display:flex;align-items:center;gap:10px;padding:calc(10px + var(--sat)) 14px 10px;background:var(--brand);color:#fff}
+  .mob-head .avatar{width:34px;height:34px;font-size:13px}
+  .mob-head .mh-who{flex:1;min-width:0}
+  .mob-head .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mob-head .rl{font-size:11px;color:rgba(255,255,255,.55)}
+  .mob-head button{color:rgba(255,255,255,.7);min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;border-radius:11px}
+  .mob-head button:active{background:rgba(255,255,255,.1)}
   .main{margin-left:0;padding:16px 14px calc(88px + var(--sab))}
   .g4{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(2,1fr)}
   .punch-wrap{grid-template-columns:1fr}
@@ -226,6 +246,8 @@ td .who .em{font-size:11.5px;color:var(--muted)}
   .bottom-nav button.active{color:var(--gold)}
 }
 @media (max-width: 520px){ .g4,.g3,.g2{grid-template-columns:1fr 1fr} .tile .v{font-size:24px} }
+/* after the generic phone grid rules on purpose, so these win */
+@media (max-width: 700px){ .grid.salary-grid{grid-template-columns:1fr} .grid.salary-tiles{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -244,6 +266,12 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 
 <!-- ================= APP ================= -->
 <div id="app">
+<div class="mob-head" id="mobHead">
+  <div class="avatar" id="mhAvatar"></div>
+  <div class="mh-who"><div class="nm" id="mhName"></div><div class="rl" id="mhRole"></div></div>
+  <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode" aria-label="Toggle theme"><svg class="ic-sun" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></button>
+  <button onclick="confirmLogout()" title="Logout" aria-label="Logout"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
+</div>
 <div class="shell">
   <aside class="sidebar">
     <div class="side-brand">
@@ -257,7 +285,7 @@ td .who .em{font-size:11.5px;color:var(--muted)}
         <div class="nm" id="sbName"></div>
         <div class="rl" id="sbRole"></div>
       </div>
-      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode" aria-label="Toggle theme"><svg class="ic-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button><button onclick="logout()" title="Logout">
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode" aria-label="Toggle theme"><svg class="ic-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="ic-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button><button onclick="confirmLogout()" title="Logout" aria-label="Logout">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
       </button>
     </div>
@@ -628,6 +656,12 @@ window.addEventListener('storage', function(e){
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState==='visible' && S.token && !ocTokenAlive(S.token, 60000)){ ocRenewToken().catch(function(){}); }
 });
+/* One tap on a phone should not sign someone out - ask first. */
+function confirmLogout(){
+  modal(`<h3>Sign out?</h3><div class="msub">You will need to sign in with Google again to use the app on this phone.</div>
+  <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
+  <button class="btn btn-danger" onclick="logout()">Sign out</button></div>`);
+}
 function logout(){
   ocClearToken();
   try{ localStorage.removeItem(OC_HINT_KEY); }catch(e){}
@@ -693,20 +727,36 @@ const IC = {
   leave:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
   users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
   pay:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M7 15h2"/></svg>',
-  set:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>'
+  set:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+  slip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h12a1 1 0 011 1v19l-3-2-3 2-3-2-3 2V3a1 1 0 011-1z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>',
+  out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
+  sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
+  moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'
 };
+/* ---- Role helpers: the ONE place the front end decides who is what.
+   The backend makes the same decision independently; these only choose what
+   to draw. Roles: Employee (default) · HR · Admin. */
+function ocRole(){ return (S.profile && S.profile.role) || 'Employee'; }
+function ocIsAdmin(){ return ocRole()==='Admin'; }
+function ocIsHR(){ return ['HR','Admin'].includes(ocRole()); }
 function navItems(){
-  const isHR = ['HR','Admin'].includes(S.profile.role);
+  const isHR = ocIsHR();
   const items = [
     {id:'dashboard', t:'Dashboard', ic:IC.dash},
     {id:'punch', t:'Attendance', ic:IC.punch},
     {id:'reports', t:'Reports', ic:IC.rep},
     {id:'leave', t:'Leave', ic:IC.leave}
   ];
+  /* Employees see their own payslip here. HR and Admin already have every
+     slip, including their own, on the Payout screen. */
+  if(!isHR) items.push({id:'mysalary', t:'My Salary', ic:IC.slip});
   if(isHR) items.push({id:'users',t:'Employees',ic:IC.users},{id:'payout',t:'Payout',ic:IC.pay});
-  if(S.profile.role==='Admin') items.push({id:'settings',t:'Settings',ic:IC.set});
+  if(ocIsAdmin()) items.push({id:'settings',t:'Settings',ic:IC.set});
   return items;
 }
+/* True when this role is allowed to open the view. Used by go(), so a screen
+   that is not on the menu cannot be opened from the address bar or console. */
+function ocCanView(v){ return navItems().some(i=>i.id===v); }
 function buildNav(){
   const items = navItems();
   $('#sideNav').innerHTML = items.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}${i.t}</button>`).join('');
@@ -722,25 +772,33 @@ function buildNav(){
   $('#sbName').textContent = S.profile.name;
   $('#sbRole').textContent = S.profile.role + ' · ' + S.profile.code;
   $('#sbAvatar').textContent = INITIALS(S.profile.name);
+  /* Phone header. The sidebar (and with it the user card, the theme toggle and
+     Logout) is hidden below 961 px, so on the phone - the APK - there was no way
+     to sign out at all. This strip gives the phone the same three things. */
+  $('#mhAvatar').textContent = INITIALS(S.profile.name);
+  $('#mhName').textContent = S.profile.name;
+  $('#mhRole').textContent = S.profile.role + ' · ' + S.profile.code;
 }
 var OC_MORE = [];
 function ocMoreMenu(){
   if(!OC_MORE.length) return;
   modal(`<h3 style="margin:0 0 14px">More</h3>
-    <div style="display:grid;gap:10px">
-      ${OC_MORE.map(i=>`<button class="btn ghost" style="justify-content:flex-start;gap:12px;height:52px;font-size:15px"
-        onclick="closeModal();go('${i.id}')">${i.ic}${i.t}</button>`).join('')}
+    <div class="more-list">
+      ${OC_MORE.map(i=>`<button class="btn btn-o" onclick="closeModal();go('${i.id}')">${i.ic}${i.t}</button>`).join('')}
     </div>
-    <div class="mrow" style="margin-top:16px"><button class="btn ghost" onclick="closeModal()">Cancel</button></div>`);
+    <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button></div>`);
 }
 function go(v){
+  /* Only screens on this role's own menu can be opened - not from the console,
+     not from a stale S.view of a previous user on the same phone. */
+  if(!ocCanView(v)) v='dashboard';
   S.view=v;
   document.querySelectorAll('[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   /* a screen that lives behind "More" still lights the More button up */
   const moreBtn = document.querySelector('#bottomNav [data-v="__more"]');
   if(moreBtn) moreBtn.classList.toggle('active', !document.querySelector('#bottomNav [data-v="'+v+'"]'));
   stopCam(); stopGPS();
-  const R = {dashboard:renderDashboard,punch:renderPunch,reports:renderReports,leave:renderLeave,users:renderUsers,payout:renderPayout,settings:renderSettings}[v];
+  const R = {dashboard:renderDashboard,punch:renderPunch,reports:renderReports,leave:renderLeave,mysalary:renderMySalary,users:renderUsers,payout:renderPayout,settings:renderSettings}[v];
   if(typeof R !== 'function'){ S.view='dashboard'; return go('dashboard'); }
   R();
 }
@@ -1375,9 +1433,17 @@ function drawUsers(q){
     <td><span class="chip ${String(u.status).toLowerCase()==='active'?'c-approved':'c-rejected'}">${esc(u.status)}</span></td>
     <td><button class="btn btn-o btn-sm" onclick="userModal(${jsArg(u)})">Edit</button></td></tr>`).join('')}</tbody>`;
 }
+/* Who may set the Role field, and on whom.
+     Admin  - any role, on anyone except themselves (so an Admin can never lock
+              the company out by demoting the last Admin by mistake)
+     HR     - never; the dropdown is shown locked and the value is not sent
+   The backend applies the same rule, so the form is a courtesy, not the gate. */
+function ocCanSetRole(u){ return ocIsAdmin() && !(u && u.email && String(u.email).toLowerCase()===String(S.profile.email||'').toLowerCase()); }
+function ocIsSelf(u){ return !!(u && u.email && String(u.email).toLowerCase()===String(S.profile.email||'').toLowerCase()); }
 function userModal(u){
-  const isAdmin=S.profile.role==='Admin';
   u=u||{};
+  const canRole=ocCanSetRole(u), self=ocIsSelf(u);
+  const roleHint = self ? 'you cannot change your own role' : (ocIsAdmin() ? '' : 'only Admin can change roles');
   modal(`<h3>${u.email?'Edit':'Add'} Employee</h3><div class="msub">User email must be unique — it is the primary key (SOP 8)</div>
   <div class="grid g2"><div><label>Full Name *</label><input id="uName" value="${esc(u.name||'')}"></div>
   <div><label>Employee Code *</label><input id="uCode" value="${esc(u.code||'')}"></div></div>
@@ -1385,13 +1451,13 @@ function userModal(u){
   <div class="grid g2"><div><label>Shift Start</label><input type="time" id="uTiming" value="${esc(fmtT24(u.timing) || '09:30')}"></div>
   <div><label>Week Off Day</label><select id="uWeekOff">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=>`<option ${u.weekOffDay===d?'selected':''}>${d}</option>`).join('')}</select></div></div>
   <div class="grid g2"><div><label>Employee Type <span style="font-weight:400;color:var(--muted)">— Staff = selfie required, Labour = location only</span></label><select id="uType"><option ${u.type==='Staff'?'selected':''}>Staff</option><option ${u.type==='Labour'?'selected':''}>Labour</option><option ${u.type==='Worker'?'selected':''}>Worker</option></select></div>
-  <div><label>Role</label><select id="uRole" ${!isAdmin?'disabled':''}>${['Employee','HR','Admin'].map(r=>`<option ${u.role===r?'selected':''}>${r}</option>`).join('')}</select></div></div>
+  <div><label>Role ${roleHint?`<span style="font-weight:400;color:var(--muted)">— ${roleHint}</span>`:''}</label><select id="uRole" ${!canRole?'disabled':''}>${['Employee','HR','Admin'].map(r=>`<option ${(u.role||'Employee')===r?'selected':''}>${r}</option>`).join('')}</select></div></div>
   <div class="grid g2"><div><label>Department</label><input id="uDept" value="${esc(u.department||'')}"></div>
   <div><label>Designation</label><input id="uDesig" value="${esc(u.designation||'')}"></div></div>
   <div class="grid g2"><div><label>Basic Salary (₹/month)</label><input type="number" id="uSalary" value="${u.basicSalary||''}"></div>
-  <div><label>Status</label><select id="uStatus"><option ${u.status==='Active'?'selected':''}>Active</option><option ${u.status==='Inactive'?'selected':''}>Inactive</option></select></div></div>
+  <div><label>Status ${self?'<span style="font-weight:400;color:var(--muted)">— you cannot deactivate yourself</span>':''}</label><select id="uStatus" ${self?'disabled':''}><option ${u.status==='Active'?'selected':''}>Active</option><option ${u.status==='Inactive'?'selected':''}>Inactive</option></select></div></div>
   <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
-  <button class="btn btn-p" onclick="saveUser(this)">Save</button></div>`);
+  <button class="btn btn-p" onclick="saveUser(this, ${jsArg(u.email||'')})">Save</button></div>`);
 }
 
 /* ================= BULK IMPORT (Excel / CSV) ================= */
@@ -1407,25 +1473,37 @@ function impMap(o){
     timing: impPick(o,['timing','shift','shifttiming','intime']) || '09:30',
     type: impPick(o,['employeetype','type']) || 'Staff',
     status: impPick(o,['status']) || 'Active',
-    role: impPick(o,['role']) || 'Employee',
+    /* The Role column is read only for Admin. For HR it is dropped here, so
+       the request never carries a role and the backend keeps the existing
+       one (or Employee for a new person). The form has the same rule. */
+    role: ocIsAdmin() ? (impPick(o,['role']) || 'Employee') : undefined,
     department: impPick(o,['department','dept']),
     designation: impPick(o,['designation','title','post']),
     basicSalary: impPick(o,['basicsalary','salary','basic','ctc']) || '0',
     weekOffDay: impPick(o,['weekoffday','weekoff','offday','off']) || 'Sunday'
   };
 }
+var IMP_ROLES = ['Employee','HR','Admin'];
 function impValid(r){
   var e=[];
   if(!r.name) e.push('Name missing');
   var at=r.email.indexOf('@');
   if(at<1 || r.email.indexOf('.',at) < at+2) e.push('Email invalid');
+  if(r.role!==undefined){
+    /* normalise "hr" / "ADMIN" and reject anything that is not a real role */
+    var m=IMP_ROLES.filter(function(x){ return x.toLowerCase()===String(r.role).trim().toLowerCase(); })[0];
+    if(m) r.role=m; else e.push('Role must be Employee, HR or Admin');
+    if(r.email===String(S.profile.email||'').toLowerCase() && r.role!==S.profile.role) e.push('Cannot change your own role');
+  }
   return e;
 }
 function importModal(){
   IMP_ROWS=[];
   modal('<h3>Bulk Import Employees</h3>'
    +'<p class="msub">Upload an Excel (.xlsx / .xls) or CSV file. The first row must contain the column headers. Leave Employee Code blank and the next code will be assigned automatically.</p>'
-   +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Download sample CSV template</a></div>'
+   +'<div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px"><b>Columns:</b> '+IMP_COLS.join(' &middot; ')+'<br>'
+   +(ocIsAdmin() ? '<b>Role</b> may be Employee, HR or Admin.' : '<b>Role</b> column is ignored &mdash; only Admin can assign roles. New people are added as Employee; existing people keep their role.')
+   +'<br><a href="#" onclick="impTemplate();return false" style="color:var(--blue);font-weight:600">Download sample CSV template</a></div>'
    +'<label>Choose file</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv" onchange="impRead(this)">'
    +'<div id="impPrev" style="margin-top:14px"></div>'
    +'<div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn btn-gold" id="impGo" disabled onclick="impRun()">Import</button></div>');
@@ -1494,12 +1572,18 @@ async function impRun(){
   }
 }
 
-async function saveUser(btn){
+async function saveUser(btn, editingEmail){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   try{
-    await api('saveUser',{name:$('#uName').value.trim(), code:$('#uCode').value.trim(), email:$('#uEmail').value.trim(),
-      timing:$('#uTiming').value, weekOffDay:$('#uWeekOff').value, type:$('#uType').value, role:$('#uRole').value,
-      department:$('#uDept').value, designation:$('#uDesig').value, basicSalary:$('#uSalary').value, status:$('#uStatus').value});
+    const p={name:$('#uName').value.trim(), code:$('#uCode').value.trim(), email:$('#uEmail').value.trim(),
+      timing:$('#uTiming').value, weekOffDay:$('#uWeekOff').value, type:$('#uType').value,
+      department:$('#uDept').value, designation:$('#uDesig').value, basicSalary:$('#uSalary').value};
+    /* role and status travel only when this user is allowed to set them; an
+       omitted field means "leave as it is" (or the default for a new person). */
+    const target={email:editingEmail||p.email};
+    if(ocCanSetRole(target)) p.role=$('#uRole').value;
+    if(!ocIsSelf(target)) p.status=$('#uStatus').value;
+    await api('saveUser',p);
     closeModal(); toast('Employee saved ✅','ok'); renderUsers();
   }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save'; }
 }
@@ -1557,8 +1641,10 @@ async function savePayout(i,status,btn){
     closeModal(); toast('Payout saved ('+status+') ✅','ok'); renderPayout();
   }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save'; }
 }
-function payslip(i){
-  const r=S.cache.payout.rows[i];
+function payslip(i){ payslipRow(S.cache.payout.rows[i]); }
+/* Shared by Payout (HR/Admin, any employee) and My Salary (own slip only). */
+function payslipRow(r){
+  if(!r) return;
   $('#payslipArea').innerHTML=`
   <div style="max-width:640px;margin:0 auto;font-family:system-ui;color:#111">
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #0f1420;padding-bottom:14px">
@@ -1594,6 +1680,63 @@ function exportPayoutCSV(){
   dl(csv,'payout_'+d.month+'.csv');
 }
 
+/* ================= MY SALARY (Employee) =================
+   The employee's own payout for one month. The backend action getMyPayout is
+   scoped to the caller - it never accepts an email - and decides whether the
+   figures may be shown yet (Settings → "Employees can see their payslip":
+   only after HR saves the month as Final, or always as provisional figures). */
+async function renderMySalary(){
+  loadingView('Loading your payslip…');
+  let d; try{ d=await api('getMyPayout',{month:S.month}); }catch(e){ return errView(e); }
+  S.cache.mypayout=d;
+  const r=d.row, st=String(d.status||'').toLowerCase();
+  const stChip = st==='final' ? '<span class="chip c-approved">Final</span>'
+               : st==='draft' ? '<span class="chip c-pending">Draft — being verified by HR</span>'
+               : '<span class="chip c-working">Provisional — days so far</span>';
+  let body;
+  if(!r){
+    body = `<div class="card empty"><div class="ic">🧾</div>${esc(d.message||'No payslip for '+MONTH_NAME(S.month)+' yet.')}<br>
+      <span style="font-size:12.5px">${d.reason==='not_final' ? 'It appears here as soon as HR marks the month as Final.' : ''}</span></div>`;
+  } else {
+    const staff=String(r.type||'').toLowerCase()==='staff';
+    body = `
+    <div class="grid g3 salary-tiles" style="margin-bottom:16px">
+      ${tile('Net Payable', INR(r.net), st==='final'?'final for '+MONTH_NAME(r.month):'so far this month', 'var(--good)')}
+      ${tile('Payable Days', r.payableDays+' / '+(r.elapsedDays||r.totalDays), r.paidLeave+' paid leave · '+r.weekOff+' week off · '+r.festival+' festival', 'var(--blue)')}
+      ${tile('Absent · Half · Late', r.absent+' · '+r.halfDays+' · '+r.lateDays, r.chargeableLate+' chargeable late', 'var(--crit)')}
+    </div>
+    <div class="grid g2 salary-grid" style="align-items:start">
+      <div class="card"><h3>Breakdown</h3><div class="chart-sub">${MONTH_NAME(r.month)} · ${stChip}</div>
+        <table class="salary-tbl">
+          <tr><td>Basic salary</td><td class="num" style="text-align:right">${INR(r.basicSalary)}</td></tr>
+          <tr><td>Per-day rate</td><td class="num" style="text-align:right">${INR(r.perDay)}</td></tr>
+          <tr><td>Gross (${r.payableDays} days × ${INR(r.perDay)})</td><td class="num" style="text-align:right">${INR(r.gross)}</td></tr>
+          <tr><td>Overtime${r.overtimeHours?' ('+r.overtimeHours+' hrs × '+INR(r.overtimeRate)+')':''}</td><td class="num" style="text-align:right;color:var(--goodtext)">${r.overtimeAmount?'+ '+INR(r.overtimeAmount):'—'}</td></tr>
+          <tr><td>Advance deducted</td><td class="num" style="text-align:right;color:var(--crit)">${r.advance?'− '+INR(r.advance):'—'}</td></tr>
+          <tr><td>Late deduction (${r.lateDays} late, ${r.chargeableLate} chargeable)</td><td class="num" style="text-align:right;color:var(--crit)">${r.lateDeduction?'− '+INR(r.lateDeduction):'—'}</td></tr>
+          <tr><td><b>Net payable</b></td><td class="num" style="text-align:right"><b style="font-size:16px">${INR(r.net)}</b></td></tr>
+        </table>
+        <div class="modal-foot" style="justify-content:flex-start"><button class="btn btn-p" onclick="payslipRow(S.cache.mypayout.row)">🧾 Print / save payslip</button></div>
+      </div>
+      <div class="card"><h3>Attendance counted</h3><div class="chart-sub">What the figures above are based on</div>
+        <div class="timeline">
+          <div class="ti"><span class="tdot" style="background:var(--good)"></span><div><div class="tt">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}</div><div class="ty">Days present</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--warn)"></span><div><div class="tt">${r.halfDays}</div><div class="ty">Half days</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--crit)"></span><div><div class="tt">${r.absent}</div><div class="ty">Absent</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--violet)"></span><div><div class="tt">${r.paidLeave}</div><div class="ty">Paid leave used</div></div></div>
+          ${staff?`<div class="ti"><span class="tdot" style="background:var(--aqua)"></span><div><div class="tt">${r.paidLeaveBalance||0}${r.paidHalfLeft?' + ½':''}</div><div class="ty">Paid leave balance</div></div></div>`:''}
+          <div class="ti"><span class="tdot" style="background:var(--muted)"></span><div><div class="tt">${r.weekOff} · ${r.festival}</div><div class="ty">Week off · Festival holidays</div></div></div>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-top:12px">Questions about a figure? Ask HR — they can correct advance, overtime and late deductions before the month is finalised.</p>
+      </div>
+    </div>`;
+  }
+  $('#main').innerHTML=`
+  <div class="topbar"><div><h2>My Salary</h2><div class="sub">${esc(S.profile.name)} · #${esc(S.profile.code)} · ${MONTH_NAME(S.month)}</div></div>
+  <div class="top-actions">${monthPicker('renderMySalary()')}</div></div>
+  ${body}`;
+}
+
 /* ================= SETTINGS (Admin) ================= */
 async function renderSettings(){
   loadingView('Settings…');
@@ -1614,6 +1757,9 @@ async function renderSettings(){
       ${F('late_deduction_per_late','Late deduction (₹ per late)','per chargeable late')}
       <label>Email notifications <span style="font-weight:400;color:var(--muted)">— email on leave apply / approve + final payout</span></label>
       <select data-k="email_notifications"><option value="yes" ${String(s.email_notifications).toLowerCase()!=='no'?'selected':''}>Yes</option><option value="no" ${String(s.email_notifications).toLowerCase()==='no'?'selected':''}>No</option></select>
+      <label>Employees can see their payslip <span style="font-weight:400;color:var(--muted)">— the "My Salary" screen</span></label>
+      <select data-k="employee_payslip_visibility"><option value="final" ${String(s.employee_payslip_visibility||'final').toLowerCase()!=='always'?'selected':''}>Only after HR saves the month as Final</option>
+      <option value="always" ${String(s.employee_payslip_visibility).toLowerCase()==='always'?'selected':''}>Always — provisional figures for the current month too</option></select>
       <h3 style="margin-top:22px">Geo-fence (optional)</h3>
       ${F('geofence_lat','Office Latitude','blank = off','text')}
       ${F('geofence_lng','Office Longitude','blank = off','text')}
@@ -1653,7 +1799,7 @@ async function delHoliday(date,name){
 }
 
 /* ============ SPEED + OFFLINE LAYER ============ */
-var OC_READS = ['init','getDashboard','getReports','getMyAttendance','getLeaves','getUsers','getPayout','getSettings','getHolidays','getRawAttendance','getAudit','getAccessRequests'];
+var OC_READS = ['init','getDashboard','getReports','getMyAttendance','getLeaves','getUsers','getPayout','getMyPayout','getSettings','getHolidays','getRawAttendance','getAudit','getAccessRequests'];
 var OC_NORERENDER = ['init'];
 var OC_INFLIGHT = {};
 var OC_RERENDERED = {};
@@ -1980,6 +2126,8 @@ function ocPrefetch(){
     want.push({key:'getUsers',          action:'getUsers',          payload:{}});
     want.push({key:'getPayout',         action:'getPayout',         payload:{month:S.month}});
     want.push({key:'getAccessRequests', action:'getAccessRequests', payload:{}});
+  } else {
+    want.push({key:'getMyPayout',       action:'getMyPayout',       payload:{month:S.month}});
   }
   if(role === 'Admin'){
     want.push({key:'getSettings', action:'getSettings', payload:{}});
