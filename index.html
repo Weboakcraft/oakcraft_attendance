@@ -737,6 +737,9 @@ const IC = {
    The backend makes the same decision independently; these only choose what
    to draw. Roles: Employee (default) · HR · Admin. */
 function ocRole(){ return (S.profile && S.profile.role) || 'Employee'; }
+/* What the backend says this person may do. It decides the rules; these flags
+   only decide what is worth drawing. */
+function ocCaps(){ return (S && S.caps) || {}; }
 function ocIsAdmin(){ return ocRole()==='Admin'; }
 function ocIsHR(){ return ['HR','Admin'].includes(ocRole()); }
 function navItems(){
@@ -750,7 +753,10 @@ function navItems(){
   /* Employees see their own payslip here. HR and Admin already have every
      slip, including their own, on the Payout screen. */
   if(!isHR) items.push({id:'mysalary', t:'My Salary', ic:IC.slip});
-  if(isHR) items.push({id:'users',t:'Employees',ic:IC.users},{id:'payout',t:'Payout',ic:IC.pay});
+  if(isHR) items.push({id:'users',t:'Employees',ic:IC.users});
+  /* Payout: HR and Admin as before, plus anyone the backend lets in — Accounts
+     keeps an ordinary Employee role but is the person who maintains it. */
+  if(isHR || ocCaps().payoutView) items.push({id:'payout',t:'Payout',ic:IC.pay});
   if(ocIsAdmin()) items.push({id:'settings',t:'Settings',ic:IC.set});
   return items;
 }
@@ -1271,6 +1277,7 @@ async function renderReports(){
   try{
     if(repFilter.span==='range'){ repEnsureRange(); rows=await repFetchRange(repFilter.from, repFilter.to); }
     else { const d=await api('getReports',{month:S.month}); rows=d.rows||[]; }
+    if(ocCaps().reportEdit){ S.cache.quota = await api('getEditQuota',{month:S.month},{fresh:true}).catch(function(){ return S.cache.quota||{}; }); }
   }catch(e){ return errView(e); }
   S.cache.reports=rows;
   const isHR=['HR','Admin'].includes(S.profile.role);
@@ -1314,7 +1321,7 @@ function drawReports(){
   }
   $('#repBody').innerHTML='<div class="tbl-wrap"><table id="repTable"></table></div>';
   const sorted=[...rows].sort((a,b)=> b.date===a.date ? a.name.localeCompare(b.name) : b.date.localeCompare(a.date));
-  $('#repTable').innerHTML=`<thead><tr><th>Date</th><th>Employee</th><th>Shift</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th><th>Proof</th></tr></thead>
+  $('#repTable').innerHTML=`<thead><tr><th>Date</th><th>Employee</th><th>Shift</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th><th>Proof</th>${repCanEdit()?'<th>Fix</th>':''}</tr></thead>
   <tbody>${sorted.length?sorted.map(r=>`<tr>
     <td>${fmtDW(r.date)}</td>
     <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)}</div></div></div></td>
@@ -1324,8 +1331,55 @@ function drawReports(){
     <td class="num">${r.hoursText||'—'}</td>
     <td>${chip(r.status)}${r.late?' <span class="chip c-late">Late</span>':''}</td>
     <td>${r.photoIn?`<a href="${esc(r.photoIn)}" target="_blank" title="Selfie">📷</a>`:''} ${r.mapIn?`<a href="${esc(r.mapIn)}" target="_blank" title="Location">📍</a>`:''}</td>
-  </tr>`).join(''):'<tr><td colspan="8"><div class="empty">No records found</div></td></tr>'}</tbody>`;
+    ${repCanEdit()?`<td>${repEditBtn(r)}</td>`:''}
+  </tr>`).join(''):`<tr><td colspan="${repCanEdit()?9:8}"><div class="empty">No records found</div></td></tr>`}</tbody>`;
 }
+/* ---------- Correcting a punch time (HR only) ----------------------------
+   A missed or mistyped punch is fixed on the raw Attendance sheet, so the hours,
+   the Present/Half/Absent status and the payslip all follow from the correction
+   instead of being overridden separately. Two corrections per employee per
+   month; the backend keeps the count and refuses the third. */
+function repCanEdit(){ return !!ocCaps().reportEdit; }
+function repQuota(email){
+  const q=S.cache.quota||{};
+  const limit=(q.reportLimit==null?2:q.reportLimit);
+  const used=(q.report||{})[String(email||'').toLowerCase()]||0;
+  return {limit:limit, used:used, left:Math.max(0,limit-used)};
+}
+function repEditBtn(r){
+  if(['Week Off','Holiday','Festival Holiday'].includes(r.status)) return '';
+  const k=repQuota(r.email);
+  if(k.left<=0) return `<span class="chip c-off" title="Both corrections for this employee are used this month">0 left</span>`;
+  const warn = k.left===1 ? ` <span style="color:var(--serious);font-size:11px;font-weight:700">1 left</span>` : '';
+  return `<button class="btn btn-o btn-ic" style="width:auto;gap:4px" title="Correct the punch times — ${k.left} of ${k.limit} left for ${esc(r.name)} this month" aria-label="Correct punch times for ${esc(r.name)} on ${esc(r.date)}, ${k.left} of ${k.limit} left" onclick="repEditModal(${jsArg(r)})">✎${warn}</button>`;
+}
+function repEditModal(r){
+  const k=repQuota(r.email);
+  modal(`<h3>Correct punch times</h3>
+  <div class="msub">${esc(r.name)} · #${esc(r.code)} · ${fmtDW(r.date)}<br>
+  <b>${k.left} of ${k.limit} corrections left for this employee this month</b> · the count starts again on the 1st</div>
+  <div class="grid g2">
+    <div><label>Punch In</label><input type="time" id="edIn" value="${esc(fmtT24(r.punchIn))}"></div>
+    <div><label>Punch Out</label><input type="time" id="edOut" value="${esc(fmtT24(r.punchOut))}"></div>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin-top:10px">Recorded now: ${r.punchIn?fmtT(r.punchIn):'no punch in'} → ${r.punchOut?fmtT(r.punchOut):'no punch out'}.
+  Leave a box empty to leave that punch alone. Hours and the day's status are recalculated from the new times, and the change is written to the audit log.</p>
+  <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Cancel</button>
+  <button class="btn btn-p" onclick="saveAttendanceEdit(this,${jsArg(r.date)},${jsArg(r.email)})">Save correction</button></div>`);
+}
+async function saveAttendanceEdit(btn,date,email){
+  const inV=$('#edIn').value, outV=$('#edOut').value;
+  if(!inV && !outV) return toast('Give a punch-in time, a punch-out time, or both','err');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
+  try{
+    const r=await api('saveAttendanceEdit',{date:date,email:email,punchIn:inV,punchOut:outV});
+    closeModal();
+    toast('Corrected ✅ · '+(r.editsLeft)+' left for this employee this month','ok');
+    S.cache.quota=null;
+    renderReports();
+  }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save correction'; }
+}
+
 function csvCell(v){
   v = (v==null ? '' : String(v));
   /* A cell that opens with = + - @ (or a tab / CR) is executed as a formula by
@@ -1591,11 +1645,14 @@ async function saveUser(btn, editingEmail){
 /* ================= PAYOUT (HR) ================= */
 async function renderPayout(){
   loadingView('Computing payroll…');
-  let d; try{ d=await api('getPayout',{month:S.month}); }catch(e){ return errView(e); }
-  S.cache.payout=d;
+  let d, q;
+  try{ [d, q] = await Promise.all([api('getPayout',{month:S.month}), api('getEditQuota',{month:S.month},{fresh:true})]); }
+  catch(e){ return errView(e); }
+  S.cache.payout=d; S.cache.quota=q;
   const total=d.rows.reduce((a,r)=>a+r.net,0);
   $('#main').innerHTML=`
-  <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (same as live AppSheet)'}</div></div>
+  <div class="topbar"><div><h2>Payout</h2><div class="sub">${MONTH_NAME(S.month)} · basis: ${d.basis==='working_days'?'Working days (SOP 12.1)':'Calendar days (same as live AppSheet)'}<br>
+  ${q.canEditPayout?`Editable by you — <b>${q.payoutLimit} edits per employee per month</b>, reset on the 1st`:'Editable by Accounts and HR only — you can view and download'}</div></div>
   <div class="top-actions">${monthPicker('renderPayout()')}<button class="btn btn-good" onclick="exportPayoutCSV()">\u2b07 Download Payout Report</button></div></div>
   <div class="grid g3" style="margin-bottom:16px">
     ${tile('Total Payable', INR(total), d.rows.length+' employees','var(--good)')}
@@ -1613,13 +1670,33 @@ async function renderPayout(){
       <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}${(r.overtimeOverride===''||r.overtimeOverride==null)?' (auto)':' (manual)'}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
       <td class="num">${r.lateDeduction?'−'+INR(r.lateDeduction):'—'}</td>
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
-      <td style="white-space:nowrap"><button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit</button>
+      <td style="white-space:nowrap">${payEditBtn(i,r)}
       <button class="btn btn-o btn-ic" title="Payslip" aria-label="Open payslip" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
   <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Chargeable Absent − Chargeable Half × 0.5 (Staff: 1 paid leave carried forward + 1 paid half day per month)'} (SOP Section 12)</p>`;
 }
+/* Payout may be edited by Accounts and HR only, three times per employee per
+   month. The button carries the count that is left and disappears once it runs
+   out; the backend refuses anything the button would not allow anyway, so this
+   is a courtesy rather than the control. */
+function payQuota(email){
+  const q=S.cache.quota||{};
+  const limit=(q.payoutLimit==null?3:q.payoutLimit);
+  const used=(q.payout||{})[String(email||'').toLowerCase()]||0;
+  return {limit:limit, used:used, left:Math.max(0,limit-used)};
+}
+function payEditBtn(i,r){
+  const q=S.cache.quota||{};
+  if(!q.canEditPayout) return '<span class="chip c-off" title="Only Accounts and HR can edit Payout">View only</span>';
+  const k=payQuota(r.email);
+  if(k.left<=0) return `<span class="chip c-absent" title="All ${k.limit} edits for this employee are used for this month">No edits left</span>`;
+  return `<button class="btn btn-o btn-sm" onclick="payModal(${i})">Edit <span style="color:var(--muted);font-weight:500">· ${k.left} left</span></button>`;
+}
 function payModal(i){
   const r=S.cache.payout.rows[i];
-  modal(`<h3>${esc(r.name)} — ${MONTH_NAME(r.month)}</h3><div class="msub">Verify Advance / basic and save — it will be recorded in the Payout sheet</div>
+  const k=payQuota(r.email);
+  if(!(S.cache.quota||{}).canEditPayout) return toast('Only Accounts and HR can edit Payout','err');
+  if(k.left<=0) return toast('All '+k.limit+' edits for '+r.name+' are used this month','err');
+  modal(`<h3>${esc(r.name)} — ${MONTH_NAME(r.month)}</h3><div class="msub">Verify Advance / basic and save — it will be recorded in the Payout sheet<br><b>${k.left} of ${k.limit} edits left for this employee this month</b> · the count starts again on the 1st</div>
   <div class="grid g3" style="margin:14px 0;text-align:center">
     <div class="tile" style="padding:12px"><div class="k">Absent</div><div class="v" style="font-size:20px">${r.absent}</div></div>
     <div class="tile" style="padding:12px"><div class="k">Half Days</div><div class="v" style="font-size:20px">${r.halfDays}</div></div>
@@ -1799,7 +1876,7 @@ async function delHoliday(date,name){
 }
 
 /* ============ SPEED + OFFLINE LAYER ============ */
-var OC_READS = ['init','getDashboard','getReports','getMyAttendance','getLeaves','getUsers','getPayout','getMyPayout','getSettings','getHolidays','getRawAttendance','getAudit','getAccessRequests'];
+var OC_READS = ['init','getDashboard','getReports','getMyAttendance','getLeaves','getUsers','getPayout','getMyPayout','getEditQuota','getSettings','getHolidays','getRawAttendance','getAudit','getAccessRequests'];
 var OC_NORERENDER = ['init'];
 var OC_INFLIGHT = {};
 var OC_RERENDERED = {};
@@ -2128,6 +2205,9 @@ function ocPrefetch(){
     want.push({key:'getAccessRequests', action:'getAccessRequests', payload:{}});
   } else {
     want.push({key:'getMyPayout',       action:'getMyPayout',       payload:{month:S.month}});
+  }
+  if(S.caps && (S.caps.payoutEdit || S.caps.reportEdit || S.caps.payoutView)){
+    want.push({key:'getEditQuota',    action:'getEditQuota',    payload:{month:S.month}});
   }
   if(role === 'Admin'){
     want.push({key:'getSettings', action:'getSettings', payload:{}});
