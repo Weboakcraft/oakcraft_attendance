@@ -1,5 +1,5 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v9';
+var CACHE = 'oakcraft-shell-v10';
 var ASSETS = ['./', './index.html', './manifest.json', './icon.svg',
               './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
