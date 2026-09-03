@@ -71,5 +71,7 @@ address bar instead of looking like a native app.
   approve/reject buttons were 28 px and unlabelled; muted text failed contrast.
 * **Camera.** A selfie survived a screen change invisibly, *Retake* could strand
   you with no camera, and a too-early snap produced a broken image.
-* **Service worker updates** are now offered instead of waiting for every tab to
-  close, and a full cache no longer wipes every screen's offline copy.
+* **Service worker updates** apply by themselves: `sw.js` calls `skipWaiting()`,
+  so a new build activates at once and the page reloads onto it. There is no
+  "update available" banner, because there is never a waiting worker for one to
+  offer. A full cache no longer wipes every screen's offline copy.

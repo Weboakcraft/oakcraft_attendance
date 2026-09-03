@@ -2083,43 +2083,24 @@ function ocRerender(){
 window.addEventListener('online', function(){ ocBanner(false); ocRerender(); });
 window.addEventListener('offline', function(){ ocBanner(true, 'You are offline — showing saved data'); });
 if('serviceWorker' in navigator){
+  /* Updates apply by themselves, on purpose. sw.js calls skipWaiting() during
+     install, so a new version never sits in the 'waiting' state - it activates
+     straight away, controllerchange fires, and the page reloads onto the new
+     build. There is therefore nothing for an "A newer version is ready" banner
+     to wait for, and the banner that used to live here could never appear. It
+     has been removed rather than left in place looking like it works.
+
+     If the banner is ever wanted back: drop self.skipWaiting() from sw.js so
+     the new worker waits, then show a bar whose button posts 'skipWaiting' to
+     reg.waiting - sw.js still listens for that message. */
   window.addEventListener('load', function(){
-    navigator.serviceWorker.register('sw.js').then(function(reg){
-      if(!reg) return;
-      /* sw.js has always listened for a 'skipWaiting' message and nothing ever
-         sent one, so a new version sat waiting until every tab was closed. */
-      function offer(w){
-        if(!w) return;
-        w.addEventListener('statechange', function(){
-          if(w.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar(w);
-        });
-      }
-      if(reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
-      reg.addEventListener('updatefound', function(){ offer(reg.installing); });
-    }).catch(function(){});
+    navigator.serviceWorker.register('sw.js').catch(function(){});
     var reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function(){
       if(reloading) return; reloading = true; location.reload();
     });
     setTimeout(ocOutboxFlush, 1500);
   });
-  function showUpdateBar(worker){
-    if(document.getElementById('ocUpdBar')) return;
-    var b = document.createElement('div');
-    b.id = 'ocUpdBar';
-    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:320;background:#0f1420;color:#fff;border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;font-size:13.5px;box-shadow:0 18px 40px -14px rgba(0,0,0,.6)';
-    b.innerHTML = '<span style="flex:1">A newer version is ready</span>';
-    var go = document.createElement('button');
-    go.textContent = 'Update';
-    go.style.cssText = 'background:#e8b34b;color:#0f1420;border:0;border-radius:9px;padding:8px 14px;font-weight:700;min-height:36px';
-    go.onclick = function(){ try{ worker.postMessage('skipWaiting'); }catch(e){ location.reload(); } };
-    var later = document.createElement('button');
-    later.textContent = 'Later';
-    later.style.cssText = 'background:transparent;color:#c9c8c2;border:0;padding:8px 6px;min-height:36px';
-    later.onclick = function(){ b.remove(); };
-    b.appendChild(go); b.appendChild(later);
-    document.body.appendChild(b);
-  }
 }
 
 
