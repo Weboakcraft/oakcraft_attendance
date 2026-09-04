@@ -238,12 +238,14 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 .ps-rule::after{content:"";position:absolute;left:0;right:62%;top:0;bottom:0;background:var(--gold)}
 
 /* ---- document title ---- */
-.ps-title{display:flex;align-items:baseline;gap:10px;margin:13px 0 11px}
-.ps-title h2{margin:0;font-size:13pt;font-weight:800;letter-spacing:3px;text-transform:uppercase}
-.ps-title .per{font-size:9.4pt;color:var(--dim)}
-.ps-title .per b{color:var(--ink)}
-.ps-badge{margin-left:auto;font-size:7.2pt;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;
-  padding:3px 10px;border-radius:20px;border:1.2px solid currentColor}
+.ps-title{position:relative;text-align:center;margin:15px 0 13px;padding:0 26mm;min-height:22px}
+.ps-title .line{display:inline-block;white-space:nowrap}
+.ps-title h2{display:inline;margin:0;font-size:15.5pt;font-weight:800;letter-spacing:2.6px;text-transform:uppercase}
+.ps-title .per{display:inline;font-size:11pt;font-weight:700;color:var(--ink);margin-left:9px}
+.ps-title .per b{font-weight:800}
+.ps-badge{position:absolute;right:0;top:50%;transform:translateY(-50%);
+  font-size:6.6pt;font-weight:800;letter-spacing:.9px;text-transform:uppercase;white-space:nowrap;
+  padding:2.5px 8px;border-radius:20px;border:1.2px solid currentColor}
 .ps-badge.fin{color:#1d6b3f}
 .ps-badge.prov{color:#8a5b00}
 
@@ -1876,6 +1878,23 @@ async function savePayout(i,status,btn){
 }
 function payslip(i){ const r=S.cache.payout.rows[i]; payslipRow(r, r && r.saved ? 'Final' : ''); }
 
+/* The browser prints its own header line from document.title, which is how
+   "OakCraft Attendance" ended up across the top of a salary slip. The title is
+   swapped for the duration of the print and put back afterwards. afterprint is
+   not fired by every browser, so a timer backs it up - and the original is read
+   once at load, so a second print can never capture the substitute. */
+const OC_APP_TITLE = document.title;
+function ocPrintAs(title){
+  document.title = title;
+  let done = false;
+  const restore = () => { if(done) return; done = true; document.title = OC_APP_TITLE;
+                          window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  setTimeout(restore, 60000);
+  window.print();
+  setTimeout(restore, 800);   /* print() blocks in most browsers, so this is the usual path */
+}
+
 /* The firm's own letterhead, from the company master record. Kept in one place
    so a change of address or GSTIN is a one-line edit. */
 const OC_FIRM = {
@@ -1968,8 +1987,7 @@ function payslipRow(r, status){
     <div class="ps-rule"></div>
 
     <div class="ps-title">
-      <h2>Salary Slip</h2>
-      <span class="per">for the month of <b>${MONTH_NAME(r.month)}</b></span>
+      <span class="line"><h2>Salary Slip</h2><span class="per">for the month of <b>${MONTH_NAME(r.month)}</b></span></span>
       <span class="ps-badge ${isFinal ? 'fin' : 'prov'}">${isFinal ? 'Final' : 'Provisional'}</span>
     </div>
 
@@ -2018,7 +2036,7 @@ function payslipRow(r, status){
       <span>Generated on ${new Date().toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'})}</span>
     </div>
   </div>`;
-  window.print();
+  ocPrintAs('PAY SLIP');
 }
 function exportPayoutCSV(){
   const d=S.cache.payout;
