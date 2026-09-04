@@ -1818,7 +1818,10 @@ function exportPayoutCSV(){
    only after HR saves the month as Final, or always as provisional figures). */
 async function renderMySalary(){
   loadingView('Loading your payslip…');
-  let d; try{ d=await api('getMyPayout',{month:S.month}); }catch(e){ return errView(e); }
+  /* Always ask the server. A payslip is the one screen where a snapshot from
+     an earlier visit is worse than a moment's wait - an employee reading last
+     week's answer has no way to tell. Offline still falls back to the cache. */
+  let d; try{ d=await api('getMyPayout',{month:S.month},{fresh:true}); }catch(e){ return errView(e); }
   /* Every figure the tiles, the breakdown and the printed slip read, forced to
      a real number. A backend that did not send one of these - an older
      deployment, or a blank cell in the sheet - used to print "undefined" or
@@ -1842,10 +1845,11 @@ async function renderMySalary(){
        app always opens on the CURRENT month, which is never final while it is
        still running, so every employee would land here and conclude the screen
        was broken. If the backend knows of a finished month, offer it. */
-    const jump = d.latestFinal ? `<div style="margin-top:14px"><button class="btn btn-p" onclick="S.month='${esc(d.latestFinal)}';renderMySalary()">Show ${esc(MONTH_NAME(d.latestFinal))} payslip</button></div>` : '';
+    const jump = (d.latestFinal && d.latestFinal !== S.month) ? `<div style="margin-top:14px"><button class="btn btn-p" onclick="S.month='${esc(d.latestFinal)}';renderMySalary()">Show ${esc(MONTH_NAME(d.latestFinal))} payslip</button></div>` : '';
     const hint = d.reason==='not_final'
         ? (d.latestFinal ? 'This month is still running. Your last finalised payslip is ready below.'
                          : 'It appears here as soon as HR marks the month as Final.')
+      : d.reason==='no_salary' ? 'Nothing can be worked out until your salary is on your record.'
       : d.reason==='no_record' ? 'Your sign-in and your employee record do not match yet.'
       : d.reason==='management' ? ''
       : 'Pick another month above to see an earlier payslip.';
