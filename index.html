@@ -754,9 +754,13 @@ function navItems(){
     {id:'reports', t:'Reports', ic:IC.rep},
     {id:'leave', t:'Leave', ic:IC.leave}
   ];
-  /* Employees see their own payslip here. HR and Admin already have every
-     slip, including their own, on the Payout screen. */
-  if(!isHR) items.push({id:'mysalary', t:'My Salary', ic:IC.slip});
+  /* My Salary follows the payroll, not the job title. The backend sets
+     caps.payslip for everyone who is paid a salary - which includes an Admin
+     who is also a salaried employee - and clears it for the three management
+     accounts, who are not on the payroll at all. Older sessions whose cached
+     init has no caps.payslip fall back to the previous rule. */
+  const hasSlip = ocCaps().payslip === undefined ? !isHR : !!ocCaps().payslip;
+  if(hasSlip) items.push({id:'mysalary', t:'My Salary', ic:IC.slip});
   if(isHR) items.push({id:'users',t:'Employees',ic:IC.users});
   /* Payout: HR and Admin as before, plus anyone the backend lets in — Accounts
      keeps an ordinary Employee role but is the person who maintains it. */
@@ -1815,6 +1819,18 @@ function exportPayoutCSV(){
 async function renderMySalary(){
   loadingView('Loading your payslip…');
   let d; try{ d=await api('getMyPayout',{month:S.month}); }catch(e){ return errView(e); }
+  /* Every figure the tiles, the breakdown and the printed slip read, forced to
+     a real number. A backend that did not send one of these - an older
+     deployment, or a blank cell in the sheet - used to print "undefined" or
+     "NaN" straight onto an employee's payslip. elapsedDays and
+     elapsedWorkingDays are left alone: the code below deliberately treats a
+     missing one as "use the whole month". */
+  if(d && d.row){
+    ['totalDays','workingDays','absent','halfDays','paidLeave','weekOff','festival',
+     'payableDays','basicSalary','perDay','gross','overtimeHours','overtimeRate',
+     'overtimeAmount','advance','lateDays','chargeableLate','lateDeduction','net',
+     'paidLeaveBalance'].forEach(function(k){ var n=Number(d.row[k]); d.row[k]=isFinite(n)?n:0; });
+  }
   S.cache.mypayout=d;
   const r=d.row, st=String(d.status||'').toLowerCase();
   const stChip = st==='final' ? '<span class="chip c-approved">Final</span>'
@@ -1822,8 +1838,19 @@ async function renderMySalary(){
                : '<span class="chip c-working">Provisional — days so far</span>';
   let body;
   if(!r){
-    body = `<div class="card empty"><div class="ic">🧾</div>${esc(d.message||'No payslip for '+MONTH_NAME(S.month)+' yet.')}<br>
-      <span style="font-size:12.5px">${d.reason==='not_final' ? 'It appears here as soon as HR marks the month as Final.' : ''}</span></div>`;
+    /* Not an error - there is simply nothing finalised for this month yet. The
+       app always opens on the CURRENT month, which is never final while it is
+       still running, so every employee would land here and conclude the screen
+       was broken. If the backend knows of a finished month, offer it. */
+    const jump = d.latestFinal ? `<div style="margin-top:14px"><button class="btn btn-p" onclick="S.month='${esc(d.latestFinal)}';renderMySalary()">Show ${esc(MONTH_NAME(d.latestFinal))} payslip</button></div>` : '';
+    const hint = d.reason==='not_final'
+        ? (d.latestFinal ? 'This month is still running. Your last finalised payslip is ready below.'
+                         : 'It appears here as soon as HR marks the month as Final.')
+      : d.reason==='no_record' ? 'Your sign-in and your employee record do not match yet.'
+      : d.reason==='management' ? ''
+      : 'Pick another month above to see an earlier payslip.';
+    body = `<div class="card empty"><div class="ic">🧾</div>${esc(d.message||('No payslip for '+MONTH_NAME(S.month)+' yet.'))}<br>
+      <span style="font-size:12.5px">${esc(hint)}</span>${jump}</div>`;
   } else {
     const staff=String(r.type||'').toLowerCase()==='staff';
     body = `
@@ -1847,7 +1874,7 @@ async function renderMySalary(){
       </div>
       <div class="card"><h3>Attendance counted</h3><div class="chart-sub">What the figures above are based on</div>
         <div class="timeline">
-          <div class="ti"><span class="tdot" style="background:var(--good)"></span><div><div class="tt">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}</div><div class="ty">Days present</div></div></div>
+          <div class="ti"><span class="tdot" style="background:var(--good)"></span><div><div class="tt">${Math.max(0,(r.elapsedWorkingDays==null?r.workingDays:Number(r.elapsedWorkingDays))-r.absent-r.halfDays)}</div><div class="ty">Days present</div></div></div>
           <div class="ti"><span class="tdot" style="background:var(--warn)"></span><div><div class="tt">${r.halfDays}</div><div class="ty">Half days</div></div></div>
           <div class="ti"><span class="tdot" style="background:var(--crit)"></span><div><div class="tt">${r.absent}</div><div class="ty">Absent</div></div></div>
           <div class="ti"><span class="tdot" style="background:var(--violet)"></span><div><div class="tt">${r.paidLeave}</div><div class="ty">Paid leave used</div></div></div>
