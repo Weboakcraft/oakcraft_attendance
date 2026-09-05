@@ -884,6 +884,10 @@ function navItems(){
 /* True when this role is allowed to open the view. Used by go(), so a screen
    that is not on the menu cannot be opened from the address bar or console. */
 function ocCanView(v){ return navItems().some(i=>i.id===v); }
+/* Who may send the day's roster out as a PDF. The backend names the accounts;
+   an older cached session that predates the flag is treated as "no", so the
+   button appears only once the backend has actually said yes. */
+function ocCanShareDay(){ return ocCaps().dayReportShare === true; }
 function buildNav(){
   const items = navItems();
   $('#sideNav').innerHTML = items.map(i=>`<button data-v="${i.id}" onclick="go('${i.id}')">${i.ic}${i.t}</button>`).join('');
@@ -1424,7 +1428,7 @@ async function renderReports(){
       <input type="date" class="month-in" id="repTo" value="${repFilter.to}" onchange="repFilter.to=this.value;renderReports()">` : ''}
     ${repFilter.span==='month' ? `<div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">\u2630 Table</button>
     <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">\u25a6 Calendar</button></div>` : ''}
-    <button class="btn btn-wa" onclick="waTodayReport(this)" title="Today's attendance as a PDF, ready to send on WhatsApp">${IC.wa} WhatsApp Today</button>
+    ${ocCanShareDay()?`<button class="btn btn-wa" onclick="waTodayReport(this)" title="Today's attendance as a PDF, ready to send on WhatsApp">${IC.wa} WhatsApp Today</button>`:''}
     <button class="btn btn-good" onclick="exportReportsCSV()">\u2b07 Download Report</button>
   </div></div>
   <div class="grid g4" style="margin-bottom:16px" id="repTiles"></div>
@@ -1652,6 +1656,7 @@ function ocAttendancePdf(rows, day){
 }
 
 async function waTodayReport(btn){
+  if(!ocCanShareDay()) return toast('Sharing the day\u2019s report is limited to the owners, HR, Accounts and MIS.','err');
   const old = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
   try{
