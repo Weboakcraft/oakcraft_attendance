@@ -195,6 +195,9 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 .modal h3{font-size:17px;margin-bottom:4px}
 .modal .msub{color:var(--muted);font-size:13px;margin-bottom:10px}
 .modal-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:22px}
+.btn-wa{background:#25d366;color:#06331d;border:1px solid #1eb455}
+.btn-wa:hover{background:#1fbe5b}
+.btn-wa svg{flex:none}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + var(--sab));background:var(--brand);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow-lg);z-index:95;display:none;max-width:90vw;text-align:center}
 .toast.err{background:var(--crit)}
 .toast.ok{background:var(--good)}
@@ -491,6 +494,11 @@ const fmtT24 = t => { const hm = ocParseHM(t); return hm ? `${String(hm[0]).padS
 const fmtTx = t => { const hm = ocParseHM(t); return hm ? fmtT(t) : ''; };
 const fmtD = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'});
 const fmtDW = d => new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+/* The LOCAL calendar date. toISOString() is UTC, so in India it named yesterday
+   between midnight and 05:30 - for an attendance app that is the wrong day for
+   five and a half hours every night. */
+const ocToday = () => { const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 const INR = n => '₹' + Number(n||0).toLocaleString('en-IN');
 
 /* ================= API ================= */
@@ -836,6 +844,7 @@ const IC = {
   users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>',
   pay:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M7 15h2"/></svg>',
   set:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+  wa:'<svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 004.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91C21.95 6.45 17.5 2 12.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.22 8.22 0 01-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23a8.23 8.23 0 018.24 8.24c0 4.54-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.13-.16.24-.64.8-.79.97-.14.16-.29.18-.54.06-.25-.13-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.5.11-.11.25-.29.37-.43.13-.15.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.13-.56-1.35-.77-1.84-.2-.49-.4-.42-.56-.43l-.47-.01c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.21.89 2.39 1.01 2.55.12.17 1.75 2.67 4.24 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.47-.07 1.47-.6 1.68-1.18.21-.58.21-1.08.14-1.18-.06-.11-.22-.17-.47-.29z"/></svg>',
   slip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h12a1 1 0 011 1v19l-3-2-3 2-3-2-3 2V3a1 1 0 011-1z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>',
   out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
   sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
@@ -1305,7 +1314,7 @@ function calendarView(rows, month){
   const daysInMonth=new Date(y,m,0).getDate();
   const firstDow=new Date(y,m-1,1).getDay();
   const byDate={}; rows.forEach(r=>byDate[r.date]=r);
-  const today=new Date().toISOString().slice(0,10);
+  const today=ocToday();
   let cells='';
   ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>cells+=`<div style="text-align:center;font-size:11px;font-weight:700;color:var(--muted);padding:6px 0">${d}</div>`);
   for(let i=0;i<firstDow;i++) cells+='<div></div>';
@@ -1366,9 +1375,14 @@ async function repFetchRange(from,to){
 function repSetSpan(v){
   repFilter.span=v;
   if(v==='range'){ repEnsureRange(); repFilter.mode='table'; }
+  /* "Today" is one day wide. It reuses the range machinery - same fetch, same
+     filter - so there is no third code path to keep in step. */
+  if(v==='day'){ repFilter.from=repFilter.to=ocToday(); repFilter.mode='table'; }
   renderReports();
 }
+function repIsSpan(){ return repFilter.span==='range' || repFilter.span==='day'; }
 function repSpanLabel(){
+  if(repFilter.span==='day') return fmtDW(repFilter.from||ocToday())+' \u00b7 today';
   return (repFilter.span==='range' && repFilter.from && repFilter.to)
     ? fmtDW(repFilter.from)+' \u2192 '+fmtDW(repFilter.to)
     : MONTH_NAME(S.month);
@@ -1379,7 +1393,7 @@ function repRows(){
   let rows=S.cache.reports||[];
   if(repFilter.emp)    rows=rows.filter(r=>r.name===repFilter.emp);
   if(repFilter.status) rows=rows.filter(r=>r.status===repFilter.status);
-  if(repFilter.span==='range' && repFilter.from && repFilter.to)
+  if(repIsSpan() && repFilter.from && repFilter.to)
     rows=rows.filter(r=>{ const d=String(r.date||'').slice(0,10); return d>=repFilter.from && d<=repFilter.to; });
   return rows;
 }
@@ -1387,7 +1401,8 @@ async function renderReports(){
   loadingView('Generating reports…');
   let rows;
   try{
-    if(repFilter.span==='range'){ repEnsureRange(); rows=await repFetchRange(repFilter.from, repFilter.to); }
+    if(repFilter.span==='day'){ repFilter.from=repFilter.to=ocToday(); rows=await repFetchRange(repFilter.from, repFilter.to); }
+    else if(repFilter.span==='range'){ repEnsureRange(); rows=await repFetchRange(repFilter.from, repFilter.to); }
     else { const d=await api('getReports',{month:S.month}); rows=d.rows||[]; }
     if(ocCaps().reportEdit){ S.cache.quota = await api('getEditQuota',{month:S.month},{fresh:true}).catch(function(){ return S.cache.quota||{}; }); }
   }catch(e){ return errView(e); }
@@ -1400,14 +1415,16 @@ async function renderReports(){
     ${isHR?`<select class="searchbox" id="repEmp" onchange="repFilter.emp=this.value;drawReports()"><option value="">All employees</option>${emps.map(e=>`<option ${repFilter.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select>`:''}
     <select class="searchbox" style="max-width:150px" id="repSt" onchange="repFilter.status=this.value;drawReports()">
       <option value="">All statuses</option>${['Present','Half Day','Absent','Paid Leave','Week Off','Festival Holiday'].map(s=>`<option ${repFilter.status===s?'selected':''}>${s}</option>`).join('')}</select>
-    <div class="seg"><button class="${repFilter.span==='month'?'on':''}" onclick="repSetSpan('month')">Month</button>
+    <div class="seg"><button class="${repFilter.span==='day'?'on':''}" onclick="repSetSpan('day')">Today</button>
+    <button class="${repFilter.span==='month'?'on':''}" onclick="repSetSpan('month')">Month</button>
     <button class="${repFilter.span==='range'?'on':''}" onclick="repSetSpan('range')">Date range</button></div>
-    ${repFilter.span==='month' ? monthPicker('renderReports()') : `
+    ${repFilter.span==='month' ? monthPicker('renderReports()') : repFilter.span==='range' ? `
       <input type="date" class="month-in" id="repFrom" value="${repFilter.from}" onchange="repFilter.from=this.value;renderReports()">
       <span style="color:var(--muted);font-size:12.5px;font-weight:650">to</span>
-      <input type="date" class="month-in" id="repTo" value="${repFilter.to}" onchange="repFilter.to=this.value;renderReports()">`}
+      <input type="date" class="month-in" id="repTo" value="${repFilter.to}" onchange="repFilter.to=this.value;renderReports()">` : ''}
     ${repFilter.span==='month' ? `<div class="seg"><button class="${repFilter.mode==='table'?'on':''}" onclick="repFilter.mode='table';drawReports()">\u2630 Table</button>
     <button class="${repFilter.mode==='cal'?'on':''}" onclick="repFilter.mode='cal';drawReports()">\u25a6 Calendar</button></div>` : ''}
+    <button class="btn btn-wa" onclick="waTodayReport(this)" title="Today's attendance as a PDF, ready to send on WhatsApp">${IC.wa} WhatsApp Today</button>
     <button class="btn btn-good" onclick="exportReportsCSV()">\u2b07 Download Report</button>
   </div></div>
   <div class="grid g4" style="margin-bottom:16px" id="repTiles"></div>
@@ -1420,7 +1437,7 @@ function drawReports(){
   rows.forEach(r=>{ if(r.status==='Present'||r.status==='Working')sm.present++; else if(r.status==='Half Day')sm.half++; else if(r.status==='Absent')sm.absent++; else if(r.status==='Paid Leave')sm.leave++; });
   $('#repTiles').innerHTML = tile('Present',sm.present,'records','var(--good)')+tile('Half Day',sm.half,'records','var(--warn)')+tile('Absent',sm.absent,'records','var(--crit)')+tile('Paid Leave',sm.leave,'records','var(--violet)');
 
-  if(repFilter.mode==='cal' && repFilter.span!=='range'){
+  if(repFilter.mode==='cal' && repFilter.span==='month'){
     // calendar always shows ONE employee
     const isHR=['HR','Admin'].includes(S.profile.role);
     const all=S.cache.reports||[];
@@ -1518,6 +1535,162 @@ function repFileTag(){
   const who=repFilter.emp ? repFilter.emp.trim().replace(/[^A-Za-z0-9]+/g,'_') : 'all_employees';
   return who+'_'+(repFilter.span==='range' ? repFilter.from+'_to_'+repFilter.to : S.month);
 }
+/* ================= TODAY'S ATTENDANCE -> PDF -> WHATSAPP =================
+   A wa.me link can only carry text, so a file cannot be attached through one.
+   On a phone the PDF is handed to the operating system's share sheet, which is
+   what actually puts it into a WhatsApp chat; on a desktop, where that API has
+   no file support, it is downloaded and WhatsApp Web is opened for the person
+   to attach it - stated plainly rather than pretended away.
+   The rows are the ones this account is allowed to see: HR and Admin get the
+   whole company, an employee gets their own line and nobody else's. */
+function ocPdfLib(){
+  return new Promise(function(res, rej){
+    if(window.jspdf && window.jspdf.jsPDF) return res();
+    var t = document.createElement('script');
+    t.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    t.onload = function(){ (window.jspdf && window.jspdf.jsPDF) ? res() : rej(new Error('The PDF library loaded but did not start.')); };
+    t.onerror = function(){ rej(new Error('Could not load the PDF library — check your internet connection and try again.')); };
+    document.head.appendChild(t);
+  });
+}
+function ocSaveBlob(blob, name){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+
+/* One day of attendance on the firm's letterhead. Returns a Blob. */
+function ocAttendancePdf(rows, day){
+  const F = OC_FIRM, D = window.jspdf.jsPDF;
+  const doc = new D({ unit:'mm', format:'a4', compress:true });
+  const W = 210, H = 297, M = 12, RIGHT = W - M;
+  const INK = [16,23,34], GOLD = [168,118,31], DIM = [91,100,114], LINE = [213,218,226];
+  const sorted = [...rows].sort(function(a,b){
+    return String(a.code||'').localeCompare(String(b.code||''), undefined, {numeric:true})
+        || String(a.name||'').localeCompare(String(b.name||''));
+  });
+  /* widths add up to 186mm - the full A4 text column */
+  const COLS = [
+    {t:'#',         w:8,  a:'l'}, {t:'Code',      w:16, a:'l'},
+    {t:'Employee',  w:50, a:'l'}, {t:'Shift',     w:18, a:'c'},
+    {t:'Punch In',  w:22, a:'c'}, {t:'Punch Out', w:22, a:'c'},
+    {t:'Hours',     w:16, a:'c'}, {t:'Status',    w:34, a:'l'}
+  ];
+  let x0 = M; COLS.forEach(function(c){ c.x = x0; x0 += c.w; });
+  const cell = (c, txt) => c.a === 'c' ? [c.x + c.w/2, {align:'center'}] : [c.x + 1.6, {align:'left'}];
+
+  function letterhead(){
+    doc.addImage(F.logo, 'JPEG', M, M, 15, 12.7);
+    doc.setTextColor.apply(doc, INK); doc.setFont('helvetica','bold'); doc.setFontSize(17);
+    doc.text(F.name, M + 19, M + 6.2, {charSpace:0.6});
+    doc.setFontSize(6.6); doc.setTextColor.apply(doc, GOLD);
+    doc.text('MANUFACTURER OF PREMIUM OFFICE & INSTITUTIONAL SEATING', M + 19, M + 9.8, {charSpace:0.35});
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.8); doc.setTextColor.apply(doc, DIM);
+    doc.text(F.addr, M + 19, M + 13.2);
+    doc.text('GSTIN ' + F.gstin + '   ·   PAN ' + F.pan + '   ·   ' + F.phone + '   ·   ' + F.email, M + 19, M + 16.2);
+    doc.setDrawColor.apply(doc, INK); doc.setLineWidth(0.8); doc.line(M, M + 19, RIGHT, M + 19);
+    doc.setDrawColor.apply(doc, GOLD); doc.setLineWidth(0.8); doc.line(M, M + 19, M + 70, M + 19);
+    doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor.apply(doc, INK);
+    doc.text('DAILY ATTENDANCE REPORT', W/2, M + 27.5, {align:'center', charSpace:0.9});
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+    doc.text(new Date(day + 'T00:00:00').toLocaleDateString('en-IN',
+      {weekday:'long', day:'numeric', month:'long', year:'numeric'}), W/2, M + 32.6, {align:'center'});
+    return M + 38;
+  }
+  function slimHead(){
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor.apply(doc, INK);
+    doc.text(F.name + ' · Daily Attendance · ' + fmtDW(day), M, M + 4);
+    doc.setDrawColor.apply(doc, LINE); doc.setLineWidth(0.4); doc.line(M, M + 6.4, RIGHT, M + 6.4);
+    return M + 12;
+  }
+  function tableHead(y){
+    doc.setFillColor.apply(doc, INK); doc.rect(M, y, RIGHT - M, 7, 'F');
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(7.2);
+    COLS.forEach(function(c){ const p = cell(c); doc.text(c.t.toUpperCase(), p[0], y + 4.7, Object.assign({charSpace:0.4}, p[1])); });
+    return y + 7;
+  }
+
+  let y = tableHead(letterhead());
+  const RH = 6.4, BOTTOM = H - 18;
+  doc.setFont('helvetica','normal');
+  sorted.forEach(function(r, i){
+    if(y + RH > BOTTOM){ doc.addPage(); y = tableHead(slimHead()); doc.setFont('helvetica','normal'); }
+    if(i % 2){ doc.setFillColor(246,248,250); doc.rect(M, y, RIGHT - M, RH, 'F'); }
+    const st = String(r.status || '');
+    const col = st === 'Absent' ? [190,30,45]
+              : st === 'Half Day' ? [154,107,0]
+              : (st === 'Present' || st === 'Working') ? [22,110,62] : DIM;
+    const vals = [String(i+1), String(r.code||''), String(r.name||''),
+                  r.timing ? fmtT(r.timing) : '—',
+                  r.punchIn ? fmtT(r.punchIn) : '—',
+                  r.punchOut ? fmtT(r.punchOut) : '—',
+                  r.hoursText || '—',
+                  st + (r.late ? '  (Late)' : '')];
+    COLS.forEach(function(c, k){
+      doc.setTextColor.apply(doc, k === 7 ? col : INK);
+      doc.setFontSize(k === 2 ? 8.2 : 7.8);
+      if(k === 7) doc.setFont('helvetica','bold'); else doc.setFont('helvetica','normal');
+      const p = cell(c);
+      doc.text(doc.splitTextToSize(vals[k], c.w - 2.5)[0] || '', p[0], y + 4.4, p[1]);
+    });
+    doc.setDrawColor.apply(doc, LINE); doc.setLineWidth(0.15); doc.line(M, y + RH, RIGHT, y + RH);
+    y += RH;
+  });
+  doc.setDrawColor.apply(doc, INK); doc.setLineWidth(0.5); doc.line(M, y + 0.2, RIGHT, y + 0.2);
+
+  const stamp = new Date().toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'});
+  const total = doc.getNumberOfPages();
+  for(let pg = 1; pg <= total; pg++){
+    doc.setPage(pg);
+    doc.setDrawColor.apply(doc, LINE); doc.setLineWidth(0.3); doc.line(M, H - 13, RIGHT, H - 13);
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.6); doc.setTextColor.apply(doc, DIM);
+    doc.text(sorted.length + ' employees · computer-generated · OakCraft Attendance System', M, H - 9.4);
+    doc.text('Generated ' + stamp + '   ·   Page ' + pg + ' of ' + total, RIGHT, H - 9.4, {align:'right'});
+  }
+  return doc.output('blob');
+}
+
+async function waTodayReport(btn){
+  const old = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Building…';
+  try{
+    await ocPdfLib();
+    const day = ocToday();
+    let rows = (S.cache.reports || []).filter(function(r){ return String(r.date||'').slice(0,10) === day; });
+    if(!rows.length) rows = await repFetchRange(day, day);
+    if(repFilter.emp) rows = rows.filter(function(r){ return r.name === repFilter.emp; });
+    if(!rows.length) throw new Error('Nothing recorded for today yet — no attendance to send.');
+
+    const name = 'OakCraft-Attendance-' + day + '.pdf';
+    const blob = ocAttendancePdf(rows, day);
+    const text = 'OAKCRAFT — Daily Attendance Report, ' + fmtDW(day);
+    let file = null;
+    try{ file = new File([blob], name, {type:'application/pdf'}); }catch(e){}
+
+    if(file && navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:name, text:text});
+      toast('Shared ✅','ok');
+    }else{
+      /* No file sharing here. Give them the PDF and a way into WhatsApp, and be
+         honest that the attaching is theirs to do. */
+      ocSaveBlob(blob, name);
+      modal(`<h3>Today's report is downloaded</h3>
+      <div class="msub">${esc(name)} — ${rows.length} employee${rows.length===1?'':'s'}</div>
+      <p style="font-size:13px;line-height:1.6;margin:14px 0 0">WhatsApp links can only carry a message, never a file, so this computer
+      cannot attach the PDF for you. Open WhatsApp below, pick the chat, then attach
+      <b>${esc(name)}</b> from your Downloads folder.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:10px">On a phone this button shares the PDF straight into a chat — no attaching needed.</p>
+      <div class="modal-foot"><button class="btn btn-o" onclick="closeModal()">Close</button>
+      <button class="btn btn-wa" onclick="window.open('https://web.whatsapp.com/send?text='+encodeURIComponent(${jsArg(text)}),'_blank','noopener');closeModal()">${IC.wa} Open WhatsApp</button></div>`);
+    }
+  }catch(e){
+    if(!(e && e.name === 'AbortError')) toast(e.message || 'Could not build the report', 'err');
+  }finally{
+    btn.disabled = false; btn.innerHTML = old;
+  }
+}
+
 function exportReportsCSV(){
   /* Exports exactly the filtered view: only the chosen employee when one is
      selected, and the whole team when "All employees" is selected. */
