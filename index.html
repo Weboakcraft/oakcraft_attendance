@@ -1449,30 +1449,40 @@ function drawReports(){
 /* ---------- Correcting a punch time (HR only) ----------------------------
    A missed or mistyped punch is fixed on the raw Attendance sheet, so the hours,
    the Present/Half/Absent status and the payslip all follow from the correction
-   instead of being overridden separately. Two corrections per employee per
-   month; the backend keeps the count and refuses the third. */
+   instead of being overridden separately. Each punch may be corrected ONCE a
+   day - one Punch In and one Punch Out per employee per day - and the day is
+   part of the backend's ledger key, so tomorrow starts clean. The backend keeps
+   the count and refuses the second attempt at the same punch. */
 function repCanEdit(){ return !!ocCaps().reportEdit; }
-function repQuota(email){
+function repQuota(date,email){
   const q=S.cache.quota||{};
-  const limit=(q.reportLimit==null?2:q.reportLimit);
-  const used=(q.report||{})[String(email||'').toLowerCase()]||0;
-  return {limit:limit, used:used, left:Math.max(0,limit-used)};
+  const per=(q.reportPerPunch==null?1:q.reportPerPunch);
+  const u=(q.report||{})[String(date||'')+'|'+String(email||'').toLowerCase()]||{};
+  const inLeft=Math.max(0, per-Number(u.in||0)), outLeft=Math.max(0, per-Number(u.out||0));
+  return {inLeft:inLeft, outLeft:outLeft, left:inLeft+outLeft, limit:2*per};
 }
 function repEditBtn(r){
   if(['Week Off','Holiday','Festival Holiday'].includes(r.status)) return '';
-  const k=repQuota(r.email);
-  if(k.left<=0) return `<span class="chip c-off" title="Both corrections for this employee are used this month">0 left</span>`;
+  const k=repQuota(r.date,r.email);
+  if(k.left<=0) return `<span class="chip c-off" title="Both punches on this date have already been corrected">0 left</span>`;
   const warn = k.left===1 ? ` <span style="color:var(--serious);font-size:11px;font-weight:700">1 left</span>` : '';
-  return `<button class="btn btn-o btn-ic" style="width:auto;gap:4px" title="Correct the punch times — ${k.left} of ${k.limit} left for ${esc(r.name)} this month" aria-label="Correct punch times for ${esc(r.name)} on ${esc(r.date)}, ${k.left} of ${k.limit} left" onclick="repEditModal(${jsArg(r)})">✎${warn}</button>`;
+  const open = k.inLeft && k.outLeft ? 'Punch In and Punch Out' : (k.inLeft ? 'Punch In only' : 'Punch Out only');
+  return `<button class="btn btn-o btn-ic" style="width:auto;gap:4px" title="Correct the punch times — ${open} still open for ${esc(r.name)} on this date" aria-label="Correct punch times for ${esc(r.name)} on ${esc(r.date)}, ${open} still open" onclick="repEditModal(${jsArg(r)})">✎${warn}</button>`;
 }
 function repEditModal(r){
-  const k=repQuota(r.email);
+  const k=repQuota(r.date,r.email);
+  /* A punch that has already been corrected today is shown but locked, so it is
+     obvious what has been used rather than the save failing after the typing. */
+  const box=(id,label,val,left)=> left
+    ? `<div><label>${label}</label><input type="time" id="${id}" value="${esc(val)}"></div>`
+    : `<div><label>${label}</label><input type="time" id="${id}" value="${esc(val)}" disabled>
+       <div style="font-size:11.5px;color:var(--serious);margin-top:5px;font-weight:600">Already corrected on this date</div></div>`;
   modal(`<h3>Correct punch times</h3>
   <div class="msub">${esc(r.name)} · #${esc(r.code)} · ${fmtDW(r.date)}<br>
-  <b>${k.left} of ${k.limit} corrections left for this employee this month</b> · the count starts again on the 1st</div>
+  <b>${k.left} of ${k.limit} corrections left for this date</b> · one Punch In and one Punch Out per day · a new day starts fresh</div>
   <div class="grid g2">
-    <div><label>Punch In</label><input type="time" id="edIn" value="${esc(fmtT24(r.punchIn))}"></div>
-    <div><label>Punch Out</label><input type="time" id="edOut" value="${esc(fmtT24(r.punchOut))}"></div>
+    ${box('edIn','Punch In',fmtT24(r.punchIn),k.inLeft)}
+    ${box('edOut','Punch Out',fmtT24(r.punchOut),k.outLeft)}
   </div>
   <p style="font-size:12px;color:var(--muted);margin-top:10px">Recorded now: ${r.punchIn?fmtT(r.punchIn):'no punch in'} → ${r.punchOut?fmtT(r.punchOut):'no punch out'}.
   Leave a box empty to leave that punch alone. Hours and the day's status are recalculated from the new times, and the change is written to the audit log.</p>
@@ -1480,13 +1490,17 @@ function repEditModal(r){
   <button class="btn btn-p" onclick="saveAttendanceEdit(this,${jsArg(r.date)},${jsArg(r.email)})">Save correction</button></div>`);
 }
 async function saveAttendanceEdit(btn,date,email){
-  const inV=$('#edIn').value, outV=$('#edOut').value;
+  /* A locked box is one whose correction is already spent for this date - never
+     send it, or the backend would refuse the whole save. */
+  const eIn=$('#edIn'), eOut=$('#edOut');
+  const inV = (eIn && !eIn.disabled) ? eIn.value : '';
+  const outV = (eOut && !eOut.disabled) ? eOut.value : '';
   if(!inV && !outV) return toast('Give a punch-in time, a punch-out time, or both','err');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   try{
     const r=await api('saveAttendanceEdit',{date:date,email:email,punchIn:inV,punchOut:outV});
     closeModal();
-    toast('Corrected ✅ · '+(r.editsLeft)+' left for this employee this month','ok');
+    toast('Corrected ✅ · '+(r.editsLeft==null?0:r.editsLeft)+' of 2 corrections left for this date','ok');
     S.cache.quota=null;
     renderReports();
   }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save correction'; }
