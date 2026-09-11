@@ -1500,7 +1500,7 @@ function repEditModal(r){
        <div style="font-size:11.5px;color:var(--serious);margin-top:5px;font-weight:600">Already corrected on this date</div></div>`;
   modal(`<h3>Correct punch times</h3>
   <div class="msub">${esc(r.name)} · #${esc(r.code)} · ${fmtDW(r.date)}<br>
-  <b>${k.left} of ${k.limit} corrections left for this date</b> · one Punch In and one Punch Out per day · a new day starts fresh</div>
+  <b>${k.left} of ${k.limit} corrections left for this date</b> · ${k.limit/2} Punch In and ${k.limit/2} Punch Out per day · a new day starts fresh</div>
   <div class="grid g2">
     ${box('edIn','Punch In',fmtT24(r.punchIn),k.inLeft)}
     ${box('edOut','Punch Out',fmtT24(r.punchOut),k.outLeft)}
@@ -1521,7 +1521,7 @@ async function saveAttendanceEdit(btn,date,email){
   try{
     const r=await api('saveAttendanceEdit',{date:date,email:email,punchIn:inV,punchOut:outV});
     closeModal();
-    toast('Corrected ✅ · '+(r.editsLeft==null?0:r.editsLeft)+' of 2 corrections left for this date','ok');
+    toast('Corrected ✅ · '+(r.editsLeft==null?0:r.editsLeft)+' corrections left for this date','ok');
     S.cache.quota=null;
     renderReports();
   }catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save correction'; }
