@@ -1229,7 +1229,7 @@ function gpsIsPWA(){ try{ return (window.matchMedia && matchMedia('(display-mode
 function gpsErrText(err){
   switch(err && err.code){
     case 1:  return gpsIsPWA()
-      ? 'Location permission blocked hai — home screen par app icon ko der tak dabao → App info → Permissions → Location → Allow. (iPhone: Settings → Privacy → Location Services → ON). Phir app band karke dobara kholo ya'+GPS_RETRY
+      ? (/Android/i.test(navigator.userAgent||'') ? 'Location permission blocked hai. Ye app <b>Chrome</b> ke through chalta hai — isliye is app ki "App info" me Location ka option nahi milta. Permission Chrome me theek hoti hai:<br>1. Settings → Apps → <b>Chrome</b> → Permissions → Location → <b>Allow</b><br>2. Chrome kholo → ⋮ → Settings → Site settings → Location → <b>weboakcraft.github.io</b> → <b>Allow</b> (ya Reset permissions)<br>3. Phone ki Location / GPS ON honi chahiye<br>Phir ye app band karke dobara kholo ya'+GPS_RETRY : 'Location permission blocked hai — iPhone: Settings → Privacy & Security → Location Services → ON, aur us browser ko "While Using the App" par rakho jisse ye app khulta hai. Phir app band karke dobara kholo ya'+GPS_RETRY)
       : 'Location permission blocked hai — address bar ke 🔒 / ⓘ icon par tap karo → Permissions → Location → Allow, phir'+GPS_RETRY;
     case 2:  return 'Phone ki Location service band hai — phone settings me Location ON karo, phir'+GPS_RETRY;
     default: return 'GPS signal nahi mil raha (chhat ke neeche ho) — khidki ya darwaze ke paas jaakar'+GPS_RETRY;
