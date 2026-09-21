@@ -2331,9 +2331,12 @@ async function renderSettings(){
   <div class="topbar"><div><h2>Settings</h2><div class="sub">System rules — only Admin can edit</div></div></div>
   <div class="grid g2" style="align-items:start">
     <div class="card"><h3>Attendance Rules</h3>
-      ${F('full_day_hours','Full day hours','this many hours = Present')}
-      ${F('half_day_hours','Half day hours','less than this = short day')}
+      ${F('staff_half_day_after','Staff punch-in cut-off','Staff is time ke baad aaye to Half Day (24-hour, jaise 11:00)','text')}
+      ${F('early_out_minutes','Jaldi jaane ki limit (minutes)','shift end se itne minute pehle punch-out = Half Day. 120 par: Staff 16:00, Worker 17:30, Rahul 17:00')}
+      ${F('worker_full_day_hours','Worker ke poore din ke ghante','Worker ne is se kam kaam kiya to Half Day')}
       ${F('grace_minutes','Grace minutes','not marked late until this long after shift')}
+      ${F('paid_half_day_until_month','Staff paid half day kab tak','is mahine tak mila (YYYY-MM). Us ke baad har Half Day chargeable hai','text')}
+      ${F('notify_skip_emails','In email par mail mat bhejo','comma se alag karke kai daal sakte hain. Inka app access waisa hi rahega','text')}
       <label>Per-day rate basis</label>
       <select data-k="per_day_rate_basis"><option value="total_days" ${s.per_day_rate_basis==='total_days'?'selected':''}>Calendar days (same as live AppSheet)</option>
       <option value="working_days" ${s.per_day_rate_basis==='working_days'?'selected':''}>Working days (SOP 12.1)</option></select>
@@ -2368,6 +2371,9 @@ async function renderSettings(){
 async function saveSettings(btn){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   const p={}; document.querySelectorAll('[data-k]').forEach(el=>p[el.dataset.k]=el.value);
+  /* full_day_hours / half_day_hours ab kisi rule me use nahi hote - staff ke liye
+     punch-in ka time aur shift-end wala gap chalta hai, worker ke liye
+     worker_full_day_hours. Isliye ye ab is screen par dikhte bhi nahi. */
   try{ await api('saveSettings',p); toast('Settings saved ✅','ok'); renderSettings(); }
   catch(e){ toast(e.message,'err'); btn.disabled=false; btn.textContent='Save Settings'; }
 }
