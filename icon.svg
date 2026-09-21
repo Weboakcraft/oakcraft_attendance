@@ -1,5 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#f0c264"/><stop offset="1" stop-color="#c9962f"/></linearGradient></defs>
   <rect width="512" height="512" rx="112" fill="#0f1420"/>
-  <rect x="96" y="96" width="320" height="320" rx="90" fill="#e8b34b"/>
-  <text x="256" y="345" font-size="230" font-family="Arial, Helvetica, sans-serif" font-weight="bold" text-anchor="middle" fill="#0f1420">O</text>
+  <circle cx="256" cy="256" r="156" fill="none" stroke="url(#g)" stroke-width="34"/>
+  <path d="M168 256 L232 320 L350 152" fill="none" stroke="url(#g)" stroke-width="46"
+        stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

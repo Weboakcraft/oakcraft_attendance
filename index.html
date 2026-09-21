@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0f1420">
 <script>/* apply saved theme early to avoid flash */(function(){try{var t=localStorage.getItem('oc_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();</script>
 <title>OakCraft Attendance</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f1420'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23e8b34b' font-family='Arial' font-weight='bold'>O</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='112' fill='%230f1420'/><circle cx='256' cy='256' r='156' fill='none' stroke='%23e8b34b' stroke-width='40'/><path d='M168 256 L232 320 L350 152' fill='none' stroke='%23e8b34b' stroke-width='52' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <!-- Google Sign-In is NOT loaded up-front any more. An employee who is already
      signed in never needs it, so the app opens without waiting for it at all.
      ocLoadGsi() injects it on demand, only on the login screen. -->
@@ -60,7 +60,7 @@ h1,h2,h3{letter-spacing:-.02em}
 #loginScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(1200px 700px at 70% -10%,#24314d 0%,#0f1420 55%,#0a0e17 100%);z-index:100;padding:20px}
 .login-card{width:100%;max-width:400px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(18px);border-radius:24px;padding:44px 36px;text-align:center;box-shadow:var(--shadow-lg);animation:rise .5s ease}
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
-.logo-mark{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:30px;font-weight:800;color:#0f1420;box-shadow:0 12px 30px -8px rgba(232,179,75,.5)}
+.logo-mark{width:64px;height:64px;border-radius:18px;background:#0f1420 url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='78 78 356 356'><circle cx='256' cy='256' r='156' fill='none' stroke='%23e8b34b' stroke-width='34'/><path d='M168 256 L232 320 L350 152' fill='none' stroke='%23e8b34b' stroke-width='46' stroke-linecap='round' stroke-linejoin='round'/></svg>") center/72% no-repeat;margin:0 auto 18px;box-shadow:0 12px 30px -8px rgba(232,179,75,.45)}
 .login-card h1{color:#fff;font-size:23px;margin-bottom:6px}
 .login-card p{color:rgba(255,255,255,.55);font-size:13.5px;margin-bottom:28px}
 #gbtn{display:flex;justify-content:center;min-height:44px}
@@ -72,7 +72,7 @@ h1,h2,h3{letter-spacing:-.02em}
 .shell{display:flex;min-height:100vh;min-height:100dvh}
 .sidebar{width:236px;background:linear-gradient(180deg,var(--brand) 0%,#0b0f19 100%);color:#fff;position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column;padding:22px 14px calc(16px + var(--sab));z-index:40}
 .side-brand{display:flex;align-items:center;gap:10px;padding:0 10px 22px}
-.side-brand .logo-mark{width:38px;height:38px;border-radius:11px;margin:0;font-size:19px}
+.side-brand .logo-mark{width:38px;height:38px;border-radius:11px;margin:0;background-color:transparent;background-size:100%;box-shadow:none}
 .side-brand b{font-size:15.5px;letter-spacing:.01em}
 .side-brand span{display:block;font-size:10.5px;color:rgba(255,255,255,.45);font-weight:500;letter-spacing:.08em;text-transform:uppercase}
 .nav{flex:1;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
@@ -366,7 +366,7 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 <!-- ================= LOGIN ================= -->
 <div id="loginScreen">
   <div class="login-card">
-    <div class="logo-mark">O</div>
+    <div class="logo-mark" role="img" aria-label="OakCraft Attendance"></div>
     <h1>OakCraft Attendance</h1>
     <p>Punch in, reports, leave &amp; payroll — all in one place.<br>Sign in with your company Google account.</p>
     <div id="gbtn"></div>
@@ -386,7 +386,7 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 <div class="shell">
   <aside class="sidebar">
     <div class="side-brand">
-      <div class="logo-mark">O</div>
+      <div class="logo-mark" role="img" aria-label="OakCraft Attendance"></div>
       <div><b>OakCraft</b><span>Attendance</span></div>
     </div>
     <nav class="nav" id="sideNav"></nav>
