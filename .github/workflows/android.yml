@@ -30,10 +30,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # The runner image already ships the Android SDK with its licences accepted.
+      # android-actions/setup-android@v3 used to work, but it now replaces those
+      # command-line tools with a newer build whose licence prompt is never answered,
+      # so the step dies on "6 of 7 SDK package licenses not accepted". Using the
+      # sdkmanager that is already on the runner avoids the whole problem.
       - name: Set up the Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'tools platform-tools platforms;android-35 build-tools;35.0.0'
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER=$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)
+          [ -x "$SDKMANAGER" ] || { echo "No sdkmanager on this runner."; exit 1; }
+          echo "Using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          {
+            echo "ANDROID_HOME=$SDK"
+            echo "ANDROID_SDK_ROOT=$SDK"
+          } >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
 
       - name: Cache Gradle
         uses: actions/cache@v4
