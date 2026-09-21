@@ -1968,7 +1968,7 @@ async function renderPayout(){
     <tbody>${d.rows.map((r,i)=>`<tr>
       <td><div class="who"><div class="avatar">${INITIALS(r.name)}</div><div><div>${esc(r.name)}</div><div class="em">#${esc(r.code)} ${r.saved?'· <b style="color:var(--goodtext)">saved</b>':''}${(r.manual||[]).length?' · <b style="color:var(--serious)" title="'+esc((r.manual||[]).join(', '))+'">'+(r.manual||[]).length+' corrected</b>':''}</div></div></div></td>
       <td class="num">${(r.elapsedWorkingDays==null?r.workingDays:r.elapsedWorkingDays)-r.absent-r.halfDays}/<span style="color:var(--crit)">${r.absent}</span>/<span style="color:#9a6b00">${r.halfDays}</span></td>
-      <td class="num" title="Opening ${r.paidLeaveOpening||0} + 1 this month · used ${r.paidLeaveUsed||0} · paid half day ${r.paidHalfLeft?'available':'used'}">${String(r.type||'').toLowerCase()==='staff'?`<b>${r.paidLeaveBalance||0}</b>${r.paidHalfLeft?' <span style="color:var(--muted)">+&frac12;</span>':''}`:'—'}</td>
+      <td class="num" title="Opening ${r.paidLeaveOpening||0} + 1 this month · used ${r.paidLeaveUsed||0} · paid half day ${r.paidHalfLeft?'available':(r.paidHalfUsed?'used':'band — discontinued')}">${String(r.type||'').toLowerCase()==='staff'?`<b>${r.paidLeaveBalance||0}</b>${r.paidHalfLeft?' <span style="color:var(--muted)">+&frac12;</span>':''}`:'—'}</td>
       <td class="num"><b>${r.payableDays}</b> / ${r.elapsedDays||r.totalDays}</td>
       <td class="num">${INR(r.basicSalary)}</td><td class="num">${INR(r.perDay)}</td><td class="num">${INR(r.gross)}</td>
       <td class="num" style="color:${r.overtimeAmount?'var(--goodtext)':'inherit'}" title="${r.overtimeHours||0} hrs × ₹${r.overtimeRate||0}${(r.overtimeOverride===''||r.overtimeOverride==null)?' (auto)':' (manual)'}">${r.overtimeAmount?'+'+INR(r.overtimeAmount):'—'}</td><td class="num" style="color:${r.advance?'var(--crit)':'inherit'}">${r.advance?'−'+INR(r.advance):'—'}</td>
@@ -1976,7 +1976,7 @@ async function renderPayout(){
       <td class="num"><b style="font-size:14.5px">${INR(r.net)}</b></td>
       <td style="white-space:nowrap">${payEditBtn(i,r)}
       <button class="btn btn-o btn-ic" title="Payslip" aria-label="Open payslip" onclick="payslip(${i})">🧾</button></td></tr>`).join('')}</tbody></table></div>
-  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Chargeable Absent − Chargeable Half × 0.5 (Staff: 1 paid leave carried forward + 1 paid half day per month)'} (SOP Section 12)</p>`;
+  <p style="font-size:12px;color:var(--muted);margin-top:12px">Formula: Net = (Per-Day Rate × Payable Days) + Overtime − Advance − Late Deduction · Payable Days = ${d.basis==='working_days'?'Working Days till today − Absent − Half×0.5 + Paid Leave + Festival + Week Off':'Days till today − Chargeable Absent − Chargeable Half × 0.5 (Staff: 1 paid leave carried forward · paid half day discontinued from Sept 2026)'} (SOP Section 12)</p>`;
 }
 /* Payout may be edited by Accounts and HR only, three times per employee per
    month. The button carries the count that is left and disappears once it runs
