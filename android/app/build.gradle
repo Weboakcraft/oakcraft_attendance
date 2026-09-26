@@ -1,4 +1,4 @@
-// OakCraft Attendance - Trusted Web Activity.
+// ATTENDANCE - Trusted Web Activity.
 //
 // A TWA runs the site in Chrome's engine with no address bar, so Google Sign-In,
 // the selfie camera, GPS, CSV downloads and printing all behave exactly as they do
@@ -11,8 +11,12 @@ def appVersionName = (project.findProperty('oakVersionName') ?: '1.0.0').toStrin
 def appVersionCode = Integer.parseInt((project.findProperty('oakVersionCode') ?: '1').toString())
 def siteOrigin     = (project.findProperty('oakSiteOrigin') ?: 'https://weboakcraft.github.io').toString().replaceAll('/+$', '')
 def sitePath       = (project.findProperty('oakSitePath')   ?: '/oakcraft_attendance/').toString()
-def launchUrl      = siteOrigin + sitePath
+// ?apk=<versionCode> tells the web app which APK it is running in, so it can offer
+// an in-app update when a newer APK is on the "latest" release.
+def launchUrl      = siteOrigin + sitePath + '?apk=' + appVersionCode
 def siteHost       = siteOrigin.replaceFirst('^https?://', '')
+// Where the in-app updater downloads the newest APK from (fixed at build time).
+def updateApkUrl   = (project.findProperty('oakApkUrl') ?: 'https://github.com/Weboakcraft/oakcraft_attendance/releases/download/latest/ATTENDANCE.apk').toString()
 
 def ksPath      = (project.findProperty('oakKeystore') ?: System.getenv('OAK_KEYSTORE') ?: '').toString().trim()
 def hasKeystore = !ksPath.isEmpty() && file(ksPath).exists()
@@ -33,6 +37,7 @@ android {
         resValue 'string', 'launch_url', launchUrl
         resValue 'string', 'site_host', siteHost
         resValue 'string', 'site_path_prefix', sitePath
+        resValue 'string', 'update_apk_url', updateApkUrl
         resValue 'string', 'asset_statements',
             '[{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"], \\"target\\": {\\"namespace\\": \\"web\\", \\"site\\": \\"' + siteOrigin + '\\"}}]'
     }
