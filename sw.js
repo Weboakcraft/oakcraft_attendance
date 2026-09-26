@@ -1,6 +1,6 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v24';
-var ASSETS = ['./', './index.html', './manifest.json', './icon.svg',
+var CACHE = 'oakcraft-shell-v25';
+var ASSETS = ['./', './index.html', './manifest.json', './favicon-48.png',
               './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', function(e){
