@@ -66,6 +66,7 @@ jobs:
           REPO="${{ github.event.repository.name }}"
           echo "origin=https://$OWNER.github.io"  >> "$GITHUB_OUTPUT"
           echo "path=/$REPO/"                     >> "$GITHUB_OUTPUT"
+          echo "apk_url=https://github.com/${{ github.repository }}/releases/download/latest/ATTENDANCE.apk" >> "$GITHUB_OUTPUT"
           NAME="${{ github.event.inputs.version_name }}"
           [ -n "$NAME" ] || NAME="1.0.${{ github.run_number }}"
           echo "version_name=$NAME" >> "$GITHUB_OUTPUT"
@@ -101,7 +102,8 @@ jobs:
             "-PoakSiteOrigin=${{ steps.cfg.outputs.origin }}" \
             "-PoakSitePath=${{ steps.cfg.outputs.path }}" \
             "-PoakVersionName=${{ steps.cfg.outputs.version_name }}" \
-            "-PoakVersionCode=${{ github.run_number }}"
+            "-PoakVersionCode=${{ github.run_number }}" \
+            "-PoakApkUrl=${{ steps.cfg.outputs.apk_url }}"
 
       - name: Collect the APK
         id: out
@@ -131,11 +133,21 @@ jobs:
             gh release create latest --title "ATTENDANCE — latest APK" \
               --notes "Built automatically from the newest commit. Copy the .apk to the phone and open it." --latest
           gh release upload latest ATTENDANCE.apk --clobber
+          # The app reads "apk-version-code" from these notes to decide whether to
+          # show its Update button - so update them only after the APK is uploaded.
+          printf '%s\n' \
+            "Built automatically from the newest commit. Copy the .apk to the phone and open it," \
+            "or tap **Update** inside the app." \
+            "" \
+            "Version ${{ steps.cfg.outputs.version_name }}" \
+            "" \
+            "apk-version-code: ${{ github.run_number }}" > notes.md
+          gh release edit latest --title "ATTENDANCE — latest APK" --notes-file notes.md
 
       - name: Summary
         run: |
           {
-            echo "### OakCraft Attendance APK"
+            echo "### ATTENDANCE APK"
             echo
             echo "| | |"
             echo "|---|---|"
