@@ -1,10 +1,15 @@
 package com.oakcraft.attendance;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -14,63 +19,116 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import androidx.core.content.FileProvider;
-
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
  * In-app updater.
  *
- * The web app shows an "Update" button when a newer APK is on the "latest" GitHub
- * release, and opens this screen through an intent:// link. This screen downloads
- * that APK and hands it to Android's installer, which asks the user to confirm.
+ * The web app shows an "Update" bar when a newer APK is on the "latest" GitHub
+ * release and opens this screen with an intent:// link. It appears as a small card
+ * over the app, downloads the new APK and installs it with Android's PackageInstaller:
  *
- * Safety: the download address is fixed at build time (it never comes from the
- * link that opened this screen), and the file is only offered for install if it
- * is this same app with a higher version. Android itself also refuses an update
- * that is not signed with the same key as the installed app.
+ *  - Android 12+ : once ATTENDANCE has installed itself one time, later updates
+ *                  install without any prompt (USER_ACTION_NOT_REQUIRED).
+ *  - otherwise   : Android shows its "Update this app?" confirmation, once per update.
+ *
+ * When the new version is installed, {@link UpdatedReceiver} re-opens the app (or,
+ * where Android blocks that, shows a "tap to open" notification).
+ *
+ * Safety: the download address is fixed at build time (never taken from the link
+ * that opened this screen), and the file is only installed if it is this same app
+ * with a higher version. Android also refuses an update signed with another key.
  */
 public class UpdateActivity extends Activity {
 
-    private static final String APK_MIME = "application/vnd.android.package-archive";
+    private static WeakReference<UpdateActivity> current = new WeakReference<>(null);
 
     private TextView status;
     private ProgressBar bar;
     private Button action;
     private Button close;
 
-    private volatile boolean downloading = false;
-    private File apkFile;
+    private volatile boolean busy = false;
     private boolean waitingForPermission = false;
+
+    // ------------------------------------------------------------ lifecycle
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        current = new WeakReference<>(this);
         buildUi();
-        startDownload();
+        // Android 13+: allow the "update installed - tap to open" notification.
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
+        }
+        begin();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (!busy) begin();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Back from the "Install unknown apps" settings screen.
-        if (waitingForPermission && apkFile != null && apkFile.exists()) {
+        if (waitingForPermission) {          // back from "Install unknown apps"
             waitingForPermission = false;
-            install();
+            begin();
         }
     }
 
-    // ------------------------------------------------------------------ UI
+    @Override
+    protected void onDestroy() {
+        if (current.get() == this) current = new WeakReference<>(null);
+        super.onDestroy();
+    }
+
+    static boolean isShowing() {
+        UpdateActivity a = current.get();
+        return a != null && !a.isFinishing() && a.visible;
+    }
+
+    private volatile boolean visible = false;
+
+    @Override
+    protected void onStart() { super.onStart(); visible = true; }
+
+    @Override
+    protected void onStop() { visible = false; super.onStop(); }
+
+    /** Called by {@link InstallResultReceiver}; safe when this screen is gone. */
+    static void report(final String message, final boolean failed) {
+        final UpdateActivity a = current.get();
+        if (a == null || a.isFinishing()) return;
+        a.runOnUiThread(() -> {
+            a.status.setText(message);
+            a.bar.setVisibility(View.GONE);
+            if (failed) {
+                a.busy = false;
+                a.showAction("Try again", v -> a.begin());
+                a.close.setText("Close");
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------- UI
 
     private int dp(float v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
@@ -80,73 +138,81 @@ public class UpdateActivity extends Activity {
         Button b = new Button(this);
         b.setText(text);
         b.setAllCaps(false);
-        b.setTextSize(16);
+        b.setTextSize(15);
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(14));
+        bg.setCornerRadius(dp(12));
         if (primary) {
             bg.setColor(Color.WHITE);
             b.setTextColor(Color.parseColor("#0057D9"));
         } else {
             bg.setColor(Color.TRANSPARENT);
-            bg.setStroke(dp(1), Color.parseColor("#66FFFFFF"));
+            bg.setStroke(dp(1), Color.parseColor("#80FFFFFF"));
             b.setTextColor(Color.WHITE);
         }
         b.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
-        lp.topMargin = dp(12);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        lp.setMargins(dp(4), dp(14), dp(4), 0);
         b.setLayoutParams(lp);
         return b;
     }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(28), dp(28), dp(28), dp(28));
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.parseColor("#0061F2"), Color.parseColor("#0A86E0"), Color.parseColor("#0FD6C2")});
-        root.setBackground(bg);
+        getWindow().setBackgroundDrawable(new ColorDrawable(Color.parseColor("#66000000")));
 
+        FrameLayout root = new FrameLayout(this);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(18), dp(18), dp(16));
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.parseColor("#0061F2"), Color.parseColor("#0A9BE0"), Color.parseColor("#0FD6C2")});
+        bg.setCornerRadius(dp(22));
+        card.setBackground(bg);
+        card.setElevation(dp(12));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.mipmap.ic_launcher);
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(96), dp(96));
-        ip.bottomMargin = dp(18);
-        root.addView(icon, ip);
-
+        head.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(dp(12), 0, 0, 0);
         TextView title = new TextView(this);
         title.setText("Updating ATTENDANCE");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(22);
-        title.setGravity(Gravity.CENTER);
+        title.setTextSize(17);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
-        root.addView(title);
-
+        texts.addView(title);
         status = new TextView(this);
         status.setTextColor(Color.parseColor("#E6FFFFFF"));
-        status.setTextSize(15);
-        status.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sp.topMargin = dp(10);
-        sp.bottomMargin = dp(18);
-        root.addView(status, sp);
+        status.setTextSize(13.5f);
+        texts.addView(status);
+        head.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(head);
 
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
-        root.addView(bar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(10)));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8));
+        bp.topMargin = dp(14);
+        card.addView(bar, bp);
 
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        close = button("Hide", false);
+        close.setOnClickListener(v -> finish());   // the download/installation carries on
         action = button("", true);
         action.setVisibility(View.GONE);
-        root.addView(action);
+        row.addView(close);
+        row.addView(action);
+        card.addView(row);
 
-        close = button("Cancel", false);
-        close.setOnClickListener(v -> finish());
-        root.addView(close);
-
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        cp.setMargins(dp(14), 0, dp(14), dp(28));
+        root.addView(card, cp);
         setContentView(root);
-        if (Build.VERSION.SDK_INT >= 21) {
-            getWindow().setStatusBarColor(Color.parseColor("#0061F2"));
-            getWindow().setNavigationBarColor(Color.parseColor("#0A86E0"));
-        }
     }
 
     private void showAction(String text, View.OnClickListener l) {
@@ -157,152 +223,23 @@ public class UpdateActivity extends Activity {
 
     private void fail(String msg) {
         runOnUiThread(() -> {
+            busy = false;
             status.setText(msg);
             bar.setVisibility(View.GONE);
-            showAction("Try again", v -> startDownload());
+            showAction("Try again", v -> begin());
             close.setText("Close");
         });
     }
 
-    // ------------------------------------------------------------ download
+    // ----------------------------------------------------------------- flow
 
-    private File targetFile() {
-        File dir;
-        if (Build.VERSION.SDK_INT >= 24) {
-            dir = new File(getCacheDir(), "updates");          // shared through FileProvider
-        } else {
-            File ext = getExternalCacheDir();                   // pre-7.0 installer needs a file:// it can read
-            dir = new File(ext != null ? ext : getCacheDir(), "updates");
-        }
-        //noinspection ResultOfMethodCallIgnored
-        dir.mkdirs();
-        return new File(dir, "ATTENDANCE-update.apk");
-    }
-
-    private void startDownload() {
-        if (downloading) return;
-        downloading = true;
-        action.setVisibility(View.GONE);
-        bar.setVisibility(View.VISIBLE);
-        bar.setIndeterminate(true);
-        status.setText("Downloading the latest version…");
-        close.setText("Cancel");
-
-        final String address = getString(R.string.update_apk_url);
-        new Thread(() -> {
-            File out = targetFile();
-            File part = new File(out.getParentFile(), out.getName() + ".part");
-            HttpURLConnection c = null;
-            try {
-                URL url = new URL(address);
-                boolean ok = false;
-                // GitHub answers with redirects to its file servers; follow them by hand
-                // so an https -> https hop to another host always works.
-                for (int hop = 0; hop < 6; hop++) {
-                    c = (HttpURLConnection) url.openConnection();
-                    c.setInstanceFollowRedirects(false);
-                    c.setConnectTimeout(20000);
-                    c.setReadTimeout(30000);
-                    c.setRequestProperty("User-Agent", "ATTENDANCE-updater");
-                    int code = c.getResponseCode();
-                    if (code >= 300 && code < 400) {
-                        String loc = c.getHeaderField("Location");
-                        c.disconnect();
-                        if (loc == null) throw new Exception("bad redirect");
-                        url = new URL(url, loc);
-                        if (!"https".equals(url.getProtocol())) throw new Exception("insecure redirect");
-                        continue;
-                    }
-                    if (code != 200) throw new Exception("HTTP " + code);
-                    ok = true;
-                    break;
-                }
-                if (!ok) throw new Exception("too many redirects");
-                long len = -1;
-                try { len = Long.parseLong(c.getHeaderField("Content-Length")); } catch (Exception ignored) { }
-                final long total = len;   // getContentLengthLong() needs Android 7+
-                try (InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(part)) {
-                    byte[] buf = new byte[64 * 1024];
-                    long done = 0;
-                    int n, lastPct = -1;
-                    while ((n = in.read(buf)) > 0) {
-                        if (isFinishing()) return;
-                        os.write(buf, 0, n);
-                        done += n;
-                        if (total > 0) {
-                            final int pct = (int) (done * 100 / total);
-                            if (pct != lastPct) {
-                                lastPct = pct;
-                                final long d = done;
-                                runOnUiThread(() -> {
-                                    bar.setIndeterminate(false);
-                                    bar.setProgress(pct);
-                                    status.setText("Downloading… " + pct + "%  (" + (d / 1024) + " / " + (total / 1024) + " KB)");
-                                });
-                            }
-                        }
-                    }
-                }
-                if (out.exists()) //noinspection ResultOfMethodCallIgnored
-                    out.delete();
-                if (!part.renameTo(out)) throw new Exception("could not save the file");
-                runOnUiThread(() -> verifyAndInstall(out));
-            } catch (Exception e) {
-                //noinspection ResultOfMethodCallIgnored
-                part.delete();
-                fail("Download failed. Check your internet connection and try again.\n(" + e.getMessage() + ")");
-            } finally {
-                if (c != null) c.disconnect();
-                downloading = false;
-            }
-        }).start();
-    }
-
-    // ------------------------------------------------------------- install
-
-    @SuppressWarnings("deprecation")
-    private static long versionOf(PackageInfo p) {
-        return Build.VERSION.SDK_INT >= 28 ? p.getLongVersionCode() : p.versionCode;
-    }
-
-    private void verifyAndInstall(File file) {
-        PackageManager pm = getPackageManager();
-        PackageInfo apk = pm.getPackageArchiveInfo(file.getAbsolutePath(), 0);
-        if (apk == null || !getPackageName().equals(apk.packageName)) {
-            //noinspection ResultOfMethodCallIgnored
-            file.delete();
-            fail("The downloaded file is not a valid ATTENDANCE update.");
-            return;
-        }
-        long installed;
-        try {
-            installed = versionOf(pm.getPackageInfo(getPackageName(), 0));
-        } catch (PackageManager.NameNotFoundException e) {
-            installed = 0;
-        }
-        bar.setIndeterminate(false);
-        bar.setProgress(100);
-        if (versionOf(apk) <= installed) {
-            status.setText("You already have the latest version (" + apk.versionName + ").");
-            bar.setVisibility(View.GONE);
-            action.setVisibility(View.GONE);
-            close.setText("Close");
-            return;
-        }
-        apkFile = file;
-        status.setText("Version " + apk.versionName + " is ready. Tap Install to finish.");
-        showAction("Install", v -> install());
-        close.setText("Later");
-        install();
-    }
-
-    private void install() {
-        if (apkFile == null || !apkFile.exists()) { startDownload(); return; }
-
+    private void begin() {
+        if (busy) return;
+        // One-time Android switch: "Allow from this source" for ATTENDANCE.
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-            status.setText("One-time step: allow ATTENDANCE to install updates.\n"
-                    + "Turn on \"Allow from this source\", then come back.");
-            showAction("Open settings", v -> {
+            bar.setVisibility(View.GONE);
+            status.setText("One-time step: turn on \"Allow from this source\" for ATTENDANCE, then come back.");
+            showAction("Allow", v -> {
                 waitingForPermission = true;
                 try {
                     startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -313,22 +250,145 @@ public class UpdateActivity extends Activity {
             });
             return;
         }
+        busy = true;
+        action.setVisibility(View.GONE);
+        bar.setVisibility(View.VISIBLE);
+        bar.setIndeterminate(true);
+        close.setText("Hide");
+        status.setText("Downloading the latest version…");
+        final Context app = getApplicationContext();
+        final String address = getString(R.string.update_apk_url);
+        new Thread(() -> run(app, address)).start();
+    }
 
+    private void run(Context app, String address) {
+        File dir = new File(app.getCacheDir(), "updates");
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        File apk = new File(dir, "ATTENDANCE-update.apk");
+        File part = new File(dir, "ATTENDANCE-update.apk.part");
+        HttpURLConnection c = null;
         try {
-            Intent i = new Intent(Intent.ACTION_VIEW);
-            if (Build.VERSION.SDK_INT >= 24) {
-                Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apkFile);
-                i.setDataAndType(uri, APK_MIME);
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } else {
-                i.setDataAndType(Uri.fromFile(apkFile), APK_MIME);
+            // ---- download (follow GitHub's redirects by hand, https only)
+            URL url = new URL(address);
+            boolean ok = false;
+            for (int hop = 0; hop < 6; hop++) {
+                c = (HttpURLConnection) url.openConnection();
+                c.setInstanceFollowRedirects(false);
+                c.setConnectTimeout(20000);
+                c.setReadTimeout(30000);
+                c.setRequestProperty("User-Agent", "ATTENDANCE-updater");
+                int code = c.getResponseCode();
+                if (code >= 300 && code < 400) {
+                    String loc = c.getHeaderField("Location");
+                    c.disconnect();
+                    if (loc == null) throw new Exception("bad redirect");
+                    url = new URL(url, loc);
+                    if (!"https".equals(url.getProtocol())) throw new Exception("insecure redirect");
+                    continue;
+                }
+                if (code != 200) throw new Exception("HTTP " + code);
+                ok = true;
+                break;
             }
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-            status.setText("Confirm the update on the next screen.\nAfter it installs, open ATTENDANCE again.");
-            showAction("Install", v -> install());
+            if (!ok) throw new Exception("too many redirects");
+            long len = -1;
+            try { len = Long.parseLong(c.getHeaderField("Content-Length")); } catch (Exception ignored) { }
+            final long total = len;
+            try (InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(part)) {
+                byte[] buf = new byte[64 * 1024];
+                long done = 0;
+                int n, last = -1;
+                while ((n = in.read(buf)) > 0) {
+                    os.write(buf, 0, n);
+                    done += n;
+                    if (total > 0) {
+                        final int pct = (int) (done * 100 / total);
+                        if (pct != last) {
+                            last = pct;
+                            ui(() -> {
+                                bar.setIndeterminate(false);
+                                bar.setProgress(pct);
+                                status.setText("Downloading… " + pct + "%");
+                            });
+                        }
+                    }
+                }
+            }
+            c.disconnect();
+            c = null;
+            if (apk.exists()) //noinspection ResultOfMethodCallIgnored
+                apk.delete();
+            if (!part.renameTo(apk)) throw new Exception("could not save the file");
+
+            // ---- check it is a newer ATTENDANCE
+            PackageManager pm = app.getPackageManager();
+            PackageInfo info = pm.getPackageArchiveInfo(apk.getAbsolutePath(), 0);
+            if (info == null || !app.getPackageName().equals(info.packageName)) {
+                //noinspection ResultOfMethodCallIgnored
+                apk.delete();
+                throw new Exception("the downloaded file is not an ATTENDANCE update");
+            }
+            long installed = versionOf(pm.getPackageInfo(app.getPackageName(), 0));
+            if (versionOf(info) <= installed) {
+                ui(() -> {
+                    busy = false;
+                    bar.setVisibility(View.GONE);
+                    status.setText("You already have the latest version.");
+                    close.setText("Close");
+                });
+                return;
+            }
+            final String name = info.versionName;
+            ui(() -> {
+                bar.setIndeterminate(true);
+                status.setText("Installing version " + name + "…");
+            });
+
+            // ---- install with PackageInstaller
+            install(app, apk);
         } catch (Exception e) {
-            fail("Could not open the installer: " + e.getMessage());
+            //noinspection ResultOfMethodCallIgnored
+            part.delete();
+            fail("Update failed: " + e.getMessage() + ". Check your internet and try again.");
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    private void ui(Runnable r) {
+        if (!isFinishing()) runOnUiThread(r);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static long versionOf(PackageInfo p) {
+        return Build.VERSION.SDK_INT >= 28 ? p.getLongVersionCode() : p.versionCode;
+    }
+
+    private static void install(Context app, File apk) throws Exception {
+        PackageInstaller installer = app.getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params =
+                new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        params.setAppPackageName(app.getPackageName());
+        params.setSize(apk.length());
+        if (Build.VERSION.SDK_INT >= 31) {
+            // No prompt when ATTENDANCE is updating itself (after its first self-install).
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+        }
+        int id = installer.createSession(params);
+        try (PackageInstaller.Session session = installer.openSession(id)) {
+            try (InputStream in = new FileInputStream(apk);
+                 OutputStream out = session.openWrite("base.apk", 0, apk.length())) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                session.fsync(out);
+            }
+            Intent cb = new Intent(app, InstallResultReceiver.class);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;   // installer adds the result
+            PendingIntent pi = PendingIntent.getBroadcast(app, id, cb, flags);
+            session.commit(pi.getIntentSender());
         }
     }
 }

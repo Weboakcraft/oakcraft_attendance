@@ -380,6 +380,15 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 #updBar .ub{background:#fff;color:#0057d9;font-weight:800;font-size:14px;padding:10px 16px;border-radius:12px;flex:none}
 #updBar .ux{color:rgba(255,255,255,.8);font-size:20px;line-height:1;padding:6px;flex:none}
 @media (max-width: 900px){ #updBar{bottom:calc(84px + var(--sab))} }
+#updHelp{display:none;position:fixed;inset:0;z-index:260;background:rgba(5,10,25,.55);align-items:flex-end;justify-content:center;padding:16px 16px calc(16px + var(--sab))}
+#updHelp.on{display:flex}
+#updHelp .uh-card{width:100%;max-width:440px;background:var(--surface);color:var(--ink);border-radius:20px;padding:20px;box-shadow:var(--shadow-lg);animation:rise .3s ease}
+#updHelp .uh-card>b{font-size:17px;display:block;margin-bottom:6px}
+#updHelp p{font-size:13.5px;color:var(--ink2);margin-bottom:10px}
+#updHelp ol{font-size:13.5px;padding-left:20px;margin:0 0 10px;display:grid;gap:6px}
+#updHelp .uh-note{font-size:12.5px;color:var(--muted)}
+#updHelp .uh-go{width:100%;background:linear-gradient(135deg,#0061f2,#0fbfc9);color:#fff;font-weight:800;padding:13px;border-radius:12px;margin-top:4px}
+#updHelp .uh-x{width:100%;color:var(--ink2);padding:11px;margin-top:4px;font-weight:600}
 /* ---------- FIRST-RUN INTRO ---------- */
 #introScreen{display:none;position:fixed;inset:0;z-index:300;overflow-y:auto;-webkit-overflow-scrolling:touch;color:#fff;
   background:linear-gradient(150deg,#0061f2 0%,#0a86e0 55%,#0fd6c2 120%);padding:calc(28px + var(--sat)) 16px calc(24px + var(--sab))}
@@ -418,6 +427,20 @@ html.show-intro body{overflow:hidden}
   <div class="ut"><b>New update available</b><span id="updVer">A newer version of ATTENDANCE is ready.</span></div>
   <button type="button" class="ub" onclick="ocDoUpdate()">Update</button>
   <button type="button" class="ux" onclick="ocLaterUpdate()" aria-label="Later">×</button>
+</div>
+<div id="updHelp" role="dialog" aria-modal="true" aria-labelledby="updHelpT">
+  <div class="uh-card">
+    <b id="updHelpT">One-time update</b>
+    <p>This version of the app cannot update itself yet. Install the new version once — after that, updates happen inside the app with one tap.</p>
+    <ol>
+      <li>Tap <b>Download update</b> — it opens in Chrome.</li>
+      <li>If Chrome asks, tap <b>Download anyway</b>, then <b>Open</b>.</li>
+      <li>Tap <b>Update</b> (allow <i>Install unknown apps</i> for Chrome if asked).</li>
+    </ol>
+    <p class="uh-note">Can't find it? Open <b>Files → Downloads → ATTENDANCE.apk</b>.</p>
+    <button type="button" class="uh-go" onclick="ocUpdGetApk()">Download update</button>
+    <button type="button" class="uh-x" onclick="document.getElementById('updHelp').classList.remove('on')">Not now</button>
+  </div>
 </div>
 <script>
 /* In-app update.
@@ -475,14 +498,21 @@ function ocCheckUpdate(force){
 }
 function ocDoUpdate(){
   if(ocApkVer() > 0){
-    /* APK with the built-in updater: open its update screen (download + install). */
+    /* APK with the built-in updater: it downloads + installs inside the app,
+       then re-opens itself. */
+    document.getElementById('updBar').classList.remove('on');
     location.href = 'intent://update#Intent;scheme=attendance-update;package=' + OC_UPD.pkg
       + ';S.browser_fallback_url=' + encodeURIComponent(OC_UPD.apk) + ';end';
   } else {
-    /* Older APK: just download the file; Android offers to install it when done. */
-    if(typeof toast === 'function') toast('Downloading the update — open the notification when it finishes and tap Install.', 'ok');
-    location.href = OC_UPD.apk;
+    /* Old APK (1.0.9 or earlier) has no updater yet: one manual install, in the
+       full Chrome app (its download + install flow works; the in-app tab stalls). */
+    document.getElementById('updHelp').classList.add('on');
   }
+}
+function ocUpdGetApk(){
+  var u = OC_UPD.apk.replace(/^https:\/\//, '');
+  location.href = 'intent://' + u + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='
+    + encodeURIComponent(OC_UPD.apk) + ';end';
 }
 function ocLaterUpdate(){
   try{ var c = JSON.parse(ocLS('oc_upd_latest') || 'null'); if(c) sessionStorage.setItem('oc_upd_later', String(c.code)); }catch(e){}
