@@ -1,5 +1,5 @@
 /* OakCraft Attendance - service worker (app shell cache) */
-var CACHE = 'oakcraft-shell-v25';
+var CACHE = 'oakcraft-shell-v26';
 var ASSETS = ['./', './index.html', './manifest.json', './favicon-48.png',
               './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
@@ -32,15 +32,19 @@ self.addEventListener('fetch', function(e){
   try { url = new URL(req.url); } catch(err){ return; }
   if(url.origin !== self.location.origin) return;
 
+  /* Page loads are cached without their ?query, so the Android app's ?apk=<n>
+     start URL still opens offline. */
+  var key = req.mode === 'navigate' ? url.origin + url.pathname : req;
+
   e.respondWith(
-    caches.match(req).then(function(hit){
+    caches.match(key).then(function(hit){
       var fresh;
       try { fresh = new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }); }
       catch(err){ fresh = req; }
       var net = fetch(fresh).then(function(res){
         if(res && res.status === 200 && res.type === 'basic'){
           var copy = res.clone();
-          caches.open(CACHE).then(function(c){ c.put(req, copy); });
+          caches.open(CACHE).then(function(c){ c.put(key, copy); });
         }
         return res;
       }).catch(function(){ return hit; });
