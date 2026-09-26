@@ -109,16 +109,16 @@ jobs:
           APK=$(find android/app/build/outputs/apk -name '*.apk' -type f | head -1)
           [ -n "$APK" ] || { echo "No APK was produced."; exit 1; }
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            cp "$APK" oakcraft-attendance.apk; echo "name=oakcraft-attendance.apk" >> "$GITHUB_OUTPUT"
+            cp "$APK" ATTENDANCE.apk; echo "name=ATTENDANCE.apk" >> "$GITHUB_OUTPUT"
           else
-            cp "$APK" oakcraft-attendance-TESTING.apk; echo "name=oakcraft-attendance-TESTING.apk" >> "$GITHUB_OUTPUT"
+            cp "$APK" ATTENDANCE-TESTING.apk; echo "name=ATTENDANCE-TESTING.apk" >> "$GITHUB_OUTPUT"
           fi
-          ls -lh oakcraft-attendance*.apk
+          ls -lh ATTENDANCE*.apk
 
       - name: Upload the APK
         uses: actions/upload-artifact@v4
         with:
-          name: oakcraft-attendance-apk
+          name: ATTENDANCE-apk
           path: ${{ steps.out.outputs.name }}
           retention-days: 60
 
@@ -128,9 +128,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view latest >/dev/null 2>&1 || \
-            gh release create latest --title "OakCraft Attendance — latest APK" \
+            gh release create latest --title "ATTENDANCE — latest APK" \
               --notes "Built automatically from the newest commit. Copy the .apk to the phone and open it." --latest
-          gh release upload latest oakcraft-attendance.apk --clobber
+          gh release upload latest ATTENDANCE.apk --clobber
 
       - name: Summary
         run: |
