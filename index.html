@@ -172,6 +172,7 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 #camVideo[style*="block"]~.lv-oval{display:block}
 .lv-hud{position:absolute;left:10px;right:10px;top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:rgba(8,12,22,.82);color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:11px 13px;font-size:14px;font-weight:650;backdrop-filter:blur(6px);line-height:1.35}
 .lv-hud .lv-ic{font-size:19px;flex:none}
+#camSnapBtn.is-off{opacity:.45;cursor:not-allowed}
 .lv-hud #lvText{flex:1 1 0;min-width:0}
 @media(max-width:600px){.lv-hud{font-size:12.5px;padding:8px 10px;gap:6px}.lv-hud .lv-ic{font-size:16px}}
 .lv-hud.go{border-color:rgba(250,178,25,.7)}
@@ -1138,6 +1139,9 @@ function go(v){
   /* Only screens on this role's own menu can be opened - not from the console,
      not from a stale S.view of a previous user on the same phone. */
   if(!ocCanView(v)) v='dashboard';
+  /* a background refresh asking to redraw the punch screen while the camera is on
+     (or a selfie is waiting) only updates the punch list — the camera keeps running */
+  if(v==='punch' && S.view==='punch' && typeof ocPunchBusy==='function' && ocPunchBusy()){ refreshPunchSide(); return; }
   S.view=v;
   document.querySelectorAll('[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   /* a screen that lives behind "More" still lights the More button up */
@@ -1333,11 +1337,14 @@ function teamTodayTable(rows){
 function errView(e){ $('#main').innerHTML=`<div class="card empty"><div class="ic">⚠️</div>${esc(e.message)}<br><br><button class="btn btn-o" onclick="go(S.view)">Retry</button></div>`; }
 
 /* ================= PUNCH ================= */
-let cam={stream:null, photo:null, pos:null, live:null, photoSrc:null, inside:undefined, geo:null};
+let cam={stream:null, photo:null, pos:null, live:null, photoSrc:null, inside:undefined, geo:null, wanted:false, punching:false};
 function needPhoto(){ return String(S.profile.type||'Staff').toLowerCase()==='staff'; } // Staff → selfie mandatory; Labour/Worker → location only
 function haversineM(la1,lo1,la2,lo2){ const R=6371000,r=Math.PI/180,dLa=(la2-la1)*r,dLo=(lo2-lo1)*r;
   const a=Math.sin(dLa/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2; return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
-function stopCam(){ if(typeof lvCancelAuto==='function') lvCancelAuto(); lvStop(); if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+/* stopCam = the person left the screen (or it is being redrawn): camera off for good.
+   stopCamOnly = just release the camera, e.g. after the selfie has been taken. */
+function stopCam(){ cam.wanted=false; fcStop(); stopCamOnly(); }
+function stopCamOnly(){ if(cam.stream){ const s=cam.stream; cam.stream=null; s.getTracks().forEach(t=>{ t.onended=null; t.stop(); }); } }
 
 /* Direct device-camera capture (the phone's own camera app) is offered to these
    accounts only. Everyone else never sees the button and the handler refuses. */
@@ -1347,289 +1354,264 @@ function ocCanDeviceCapture(){
   return !!em && DEVICE_CAPTURE_EMAILS.includes(em);
 }
 
-/* ================= LIVENESS / ANTI-SPOOFING =================
-   A selfie alone proves nothing — a photo held up on another phone looks the same
-   to a camera. So before any selfie is accepted the person in front of the camera
-   has to pass a live check, in a RANDOM order that changes on every attempt:
-     • Blink            — a printed or on-screen photo cannot close its eyes
-     • Turn left/right  — checked with real 3-D parallax: when a real head turns,
-                          the nose moves sideways against the eyes and one cheek
-                          disappears. A flat photo or phone screen that is tilted
-                          only squashes evenly — the nose stays on the midline —
-                          so it can never pass, whatever the face model "thinks"
-     • Smile
-   The face is tracked the whole time: if it disappears, a second face shows up,
-   or it jumps (a phone swapped in) the check restarts from zero. The selfie is
-   taken automatically at the end, from the same live stream, so no one can pass
-   with one face and photograph another. A pass is valid for 2 minutes.            */
-const LV = {
-  MP_VER: '0.10.14',
-  MODEL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-  VALID_MS: 120000,   // a passed check stays valid for 2 minutes
-  STEP_MS: 9000,      // time allowed for each challenge
-  MIN_IOD: 0.10,      // eye-to-eye distance must be ≥10% of the frame width (face close enough)
-  TURN_NOSE: 0.15,    // sideways nose shift, in eye-widths, that only a real 3-D head produces
-  TURN_CHEEK: 0.35,   // change in log(left cheek / right cheek) width during the turn
-  FLAT_NOSE: 0.08,    // turned the face but the nose barely moved = flat picture
-  MAX_JUMP: 0.18,     // face centre may not jump more than 18% of the frame between frames
-  LOST_MS: 700,       // face may vanish this long before the check is reset
-  MAX_FAILS: 3, LOCK_MS: 30000
+/* ================= REAL-FACE CHECK (passive anti-spoofing) =================
+   The flow is the familiar one — Camera On → Take Selfie → Punch — with no blinking
+   or head-turning. While the camera is on, every frame is checked quietly:
+     1. Face Landmarker — exactly one face, close enough to the camera
+     2. Silent-Face MiniFASNet V2 + V1SE (two models, fused) — trained to tell a
+        real face from a face shown on a PHONE / LAPTOP SCREEN or a PRINTED photo,
+        from screen texture, moiré, glare and print artefacts
+     3. Object detector — if a phone, tablet, laptop or TV is seen around the face,
+        the selfie is refused outright
+   "Take Selfie" only works once several frames in a row agree it is a real face.
+   Nothing here ever switches the camera off by itself.                          */
+const FC = {
+  MP_VER: '0.10.14', TF_VER: '4.22.0',
+  FACE_MODEL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  OBJ_MODEL:  'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite',
+  SPOOF: [ { url:'models/antispoof/2.7_80x80_MiniFASNetV2/model.json',      scale:2.7 },
+           { url:'models/antispoof/4_0_0_80x80_MiniFASNetV1SE/model.json',  scale:4.0 } ],
+  DEVICES: ['cell phone','tv','laptop'],
+  WINDOW: 8,           // judge on the last 8 checked frames
+  MIN_SAMPLES: 5,      // need at least 5 before saying "real"
+  REAL_MIN: 0.60,      // median real-face score needed
+  REAL_RATIO: 0.70,    // share of recent frames that must look real
+  DEVICE_SCORE: 0.35,  // object-detector confidence for a phone / screen
+  MIN_IOD: 0.08,       // eye-to-eye ≥ 8% of the frame width (face close enough)
+  TICK_MS: 160,
+  SELFIE_MAX_AGE: 170000   // a selfie older than ~3 min must be retaken before punching
 };
-const LV_TEXT = {
-  blink:     ['👁️', 'Blink your eyes — photo & punch happen automatically'],
-  turnLeft:  ['⬅️', 'Slowly turn your head to your LEFT'],
-  turnRight: ['➡️', 'Slowly turn your head to your RIGHT'],
-  smile:     ['😁', 'Relax your face, then give a big smile']
-};
-let lv = { lm:null, loading:null, raf:0, st:null, fails:0, lockUntil:0, expTimer:null };
+/* Safety switch, editable on GitHub without touching code: face-check.json
+   {"mode":"strict"} = block photos/screens (default) · "log" = only the phone/screen
+   object check blocks, the texture score is just recorded · "off" = no face check. */
+let FC_MODE = 'strict';
+try{ fetch('face-check.json?t='+Date.now(), {cache:'no-store'}).then(r=>r.ok?r.json():null)
+  .then(j=>{ if(j && /^(strict|log|off)$/.test(j.mode)) FC_MODE=j.mode; }).catch(()=>{}); }catch(e){}
+let fc = { loading:null, lm:null, od:null, tf:null, nets:[], timer:0, hist:[], dev:0, status:'idle', n:0, busy:false };
 
-function lvLoad(){
-  if(lv.lm) return Promise.resolve(lv.lm);
-  if(lv.loading) return lv.loading;
-  lv.loading = (async()=>{
-    const bases = [`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${LV.MP_VER}`,
-                   `https://unpkg.com/@mediapipe/tasks-vision@${LV.MP_VER}`];
-    let last;
-    for(const b of bases){
-      try{
-        const mp = await import(b + '/vision_bundle.mjs');
-        const files = await mp.FilesetResolver.forVisionTasks(b + '/wasm');
-        const opts = d => ({ baseOptions:{ modelAssetPath:LV.MODEL, delegate:d }, runningMode:'VIDEO', numFaces:2,
-          outputFaceBlendshapes:true, minFaceDetectionConfidence:0.6, minFacePresenceConfidence:0.6, minTrackingConfidence:0.6 });
-        let lm;
-        try{ lm = await mp.FaceLandmarker.createFromOptions(files, opts('GPU')); }
-        catch(e){ lm = await mp.FaceLandmarker.createFromOptions(files, opts('CPU')); }
-        lv.lm = lm; return lm;
-      }catch(e){ last = e; }
-    }
-    lv.loading = null;
-    throw new Error('Face check could not load — check the internet connection and try again');
+function fcScript(src){ return new Promise((ok,no)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=ok; s.onerror=()=>no(new Error('load '+src)); document.head.appendChild(s); }); }
+function fcLoad(){
+  if(fc.lm && fc.nets.length) return Promise.resolve(fc);
+  if(fc.loading) return fc.loading;
+  fc.loading = (async()=>{
+    const mpBases = [`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${FC.MP_VER}`, `https://unpkg.com/@mediapipe/tasks-vision@${FC.MP_VER}`];
+    const tfSrcs  = [`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${FC.TF_VER}/dist/tf.min.js`, `https://unpkg.com/@tensorflow/tfjs@${FC.TF_VER}/dist/tf.min.js`];
+    const loadMP = async()=>{
+      let last;
+      for(const b of mpBases){
+        try{
+          const mp = await import(b + '/vision_bundle.mjs');
+          const files = await mp.FilesetResolver.forVisionTasks(b + '/wasm');
+          const mk = async (Cls, opts) => { try{ return await Cls.createFromOptions(files, {...opts, baseOptions:{...opts.baseOptions, delegate:'GPU'}}); }
+                                            catch(e){ return await Cls.createFromOptions(files, {...opts, baseOptions:{...opts.baseOptions, delegate:'CPU'}}); } };
+          fc.lm = await mk(mp.FaceLandmarker, { baseOptions:{ modelAssetPath:FC.FACE_MODEL }, runningMode:'VIDEO', numFaces:2,
+            minFaceDetectionConfidence:0.6, minFacePresenceConfidence:0.6, minTrackingConfidence:0.6 });
+          try{ fc.od = await mk(mp.ObjectDetector, { baseOptions:{ modelAssetPath:FC.OBJ_MODEL }, runningMode:'VIDEO',
+            scoreThreshold:FC.DEVICE_SCORE, maxResults:5, categoryAllowlist:FC.DEVICES }); }
+          catch(e){ fc.od = null; }      // extra layer only — the spoof models still run
+          return;
+        }catch(e){ last=e; }
+      }
+      throw last || new Error('face model');
+    };
+    const loadTF = async()=>{
+      if(!window.tf){ let ok=false; for(const s of tfSrcs){ try{ await fcScript(s); ok=true; break; }catch(e){} } if(!ok) throw new Error('tf'); }
+      fc.tf = window.tf;
+      try{ await fc.tf.ready(); }catch(e){}
+      fc.nets = await Promise.all(FC.SPOOF.map(async m => ({ scale:m.scale, net: await fc.tf.loadGraphModel(m.url) })));
+    };
+    try{ await Promise.all([loadMP(), loadTF()]); }
+    catch(e){ fc.loading=null; throw new Error('Face check could not load — check the internet connection and try again'); }
+    return fc;
   })();
-  return lv.loading;
+  return fc.loading;
 }
-function lvValid(){ return !!(cam.live && cam.live.ok && (Date.now() - cam.live.at) <= LV.VALID_MS); }
-function lvStop(){ if(lv.raf){ cancelAnimationFrame(lv.raf); lv.raf=0; } lv.st=null; }
-function lvShuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-/* Staff flow: just one blink. A photo or a phone screen cannot blink; the moment
-   the eyes open again the selfie is captured from the live stream and the punch is
-   saved automatically. (The head-turn / smile checks below stay available.) */
-const LV_STEPS = ['blink'];
-function lvSequence(){
-  if(LV_STEPS && LV_STEPS.length) return LV_STEPS.slice();
-  const turn = Math.random()<0.5 ? 'turnLeft' : 'turnRight';
-  const other = turn==='turnLeft' ? 'turnRight' : 'turnLeft';
-  const third = Math.random()<0.5 ? 'smile' : other;
-  return lvShuffle(['blink', turn, third]);
-}
-/* geometry of one face, measured in image pixels (not the model's own 3-D guess) */
-function lvMetrics(L, W, H){
-  const P = i => ({ x:L[i].x*W, y:L[i].y*H });
-  const rEye=P(33), lEye=P(263), nose=P(1), rCheek=P(234), lCheek=P(454);
-  const iod = Math.hypot(lEye.x-rEye.x, lEye.y-rEye.y) || 1;
-  const ux=(lEye.x-rEye.x)/iod, uy=(lEye.y-rEye.y)/iod;
-  const mx=(rEye.x+lEye.x)/2, my=(rEye.y+lEye.y)/2;
-  const noseOff = ((nose.x-mx)*ux + (nose.y-my)*uy) / iod;          // + = towards the person's left
-  const dR = Math.hypot(nose.x-rCheek.x, nose.y-rCheek.y), dL = Math.hypot(nose.x-lCheek.x, nose.y-lCheek.y);
-  const cheek = Math.log((dL+1)/(dR+1));                             // − = person's left cheek hidden
-  return { iodRel: iod/W, cx: mx/W, cy: my/H, noseOff, cheek };
-}
-function lvShapes(res){
-  const out = {}; const c = res.faceBlendshapes && res.faceBlendshapes[0];
-  if(c && c.categories) c.categories.forEach(k => out[k.categoryName] = k.score);
-  return { blink: Math.min(out.eyeBlinkLeft||0, out.eyeBlinkRight||0),
-           open:  Math.max(out.eyeBlinkLeft||0, out.eyeBlinkRight||0),
-           smile: ((out.mouthSmileLeft||0) + (out.mouthSmileRight||0)) / 2 };
-}
-function lvHud(icon, text, cls){
-  const h=$('#lvHud'); if(!h) return;
-  h.style.display='flex'; h.className='lv-hud '+(cls||'');
-  $('#lvIcon').textContent=icon||''; $('#lvText').textContent=text||'';
-}
-function lvDots(){
-  const d=$('#lvDots'), s=lv.st; if(!d||!s) return;
-  d.innerHTML = s.seq.map((k,i)=>`<i class="${i<s.idx?'done':i===s.idx&&s.phase==='step'?'now':''}"></i>`).join('');
-}
-function lvProg(frac){ const p=$('#lvProg'); if(p) p.style.width=Math.max(0,Math.min(1,frac))*100+'%'; }
+function fcStop(){ if(fc.timer){ clearTimeout(fc.timer); fc.timer=0; } fc.hist=[]; fc.dev=0; fc.status='idle'; }
 
-async function lvStart(){
-  stopCamOnly();
-  lvCancelAuto();
-  cam.live=null; cam.photo=null; cam.photoSrc=null; checkReady();
-  if(Date.now() < lv.lockUntil){
-    const s=Math.ceil((lv.lockUntil-Date.now())/1000);
-    lvHud('⏳', `Too many failed attempts — try again in ${s}s`, 'bad'); camButtons('start'); return;
+/* face box (pixels) from the landmarks */
+function fcBox(L, W, H){
+  let x0=1,y0=1,x1=0,y1=0; for(const p of L){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+  const iod = Math.hypot((L[263].x-L[33].x)*W, (L[263].y-L[33].y)*H);
+  return { x:x0*W, y:y0*H, w:(x1-x0)*W, h:(y1-y0)*H, iodRel: iod/W };
+}
+/* Silent-Face crop: the face box scaled ×2.7 / ×4.0 around its centre, kept inside the frame */
+function fcCrop(W, H, b, scale){
+  const s = Math.max(0.1, Math.min((H-1)/b.h, (W-1)/b.w, scale));
+  const nw=b.w*s, nh=b.h*s, cx=b.x+b.w/2, cy=b.y+b.h/2;
+  let l=cx-nw/2, t=cy-nh/2, r=cx+nw/2, d=cy+nh/2;
+  if(l<0){ r-=l; l=0; } if(t<0){ d-=t; t=0; }
+  if(r>W-1){ l-=r-W+1; r=W-1; } if(d>H-1){ t-=d-H+1; d=H-1; }
+  const x=Math.max(0,Math.round(l)), y=Math.max(0,Math.round(t));
+  return { x, y, w:Math.max(2,Math.round(r)-x+1), h:Math.max(2,Math.round(d)-y+1) };
+}
+const fcCanvas = document.createElement('canvas'); fcCanvas.width=80; fcCanvas.height=80;
+const fcCtx = fcCanvas.getContext('2d', {willReadFrequently:true});
+/* fused [paper, real, screen] probabilities for one frame / image */
+function fcSpoof(src, W, H, box){
+  const tf=fc.tf, sums=[0,0,0]; let used=0;
+  for(const m of fc.nets){
+    const c=fcCrop(W,H,box,m.scale);
+    fcCtx.drawImage(src, c.x, c.y, c.w, c.h, 0, 0, 80, 80);
+    const px=fcCtx.getImageData(0,0,80,80).data, plane=6400, data=new Float32Array(plane*3);
+    for(let i=0;i<plane;i++){ data[i]=px[i*4+2]; data[plane+i]=px[i*4+1]; data[2*plane+i]=px[i*4]; }   // BGR, 0–255, CHW
+    const logits = tf.tidy(()=>{ const out=m.net.predict(tf.tensor4d(data,[1,3,80,80])); return (Array.isArray(out)?out[0]:out).dataSync().slice(0,3); });
+    const mx=Math.max(...logits), e=logits.map(v=>Math.exp(v-mx)), sm=e[0]+e[1]+e[2];
+    for(let k=0;k<3;k++) sums[k]+=e[k]/sm; used++;
   }
-  camButtons('busy');
-  lvHud('⏳', 'Loading face check…', '');
-  let lm;
-  try{ lm = await lvLoad(); }
-  catch(e){ lvHud('⚠️', e.message, 'bad'); camButtons('start'); return; }
-  if(!$('#camVideo')) return;                       // left the screen while loading
-  const ok = await startCam(); if(!ok){ lvHud('', '', ''); $('#lvHud').style.display='none'; return; }
+  return used ? { paper:sums[0]/used, real:sums[1]/used, screen:sums[2]/used } : null;
+}
+/* a phone / laptop / TV whose box surrounds the face centre */
+function fcDeviceNearFace(dets, box){
+  const cx=box.x+box.w/2, cy=box.y+box.h/2;
+  return (dets||[]).some(d=>{ const bb=d.boundingBox; if(!bb) return false;
+    const padX=bb.width*0.15, padY=bb.height*0.15;
+    return cx>bb.originX-padX && cx<bb.originX+bb.width+padX && cy>bb.originY-padY && cy<bb.originY+bb.height+padY; });
+}
+function fcVerdict(){
+  if(FC_MODE==='off') return 'real';
+  if(fc.dev>0) return 'device';
+  const h=fc.hist; if(h.length < FC.MIN_SAMPLES) return 'checking';
+  const reals=h.map(x=>x.real).sort((a,b)=>a-b), med=reals[Math.floor(reals.length/2)];
+  const ratio=h.filter(x=>x.real>=FC.REAL_MIN).length/h.length;
+  if(FC_MODE==='log') return 'real';
+  return (med>=FC.REAL_MIN && ratio>=FC.REAL_RATIO) ? 'real' : 'spoof';
+}
+function fcMedianReal(){ const r=fc.hist.map(x=>x.real).sort((a,b)=>a-b); return r.length ? r[Math.floor(r.length/2)] : 0; }
+function fcShow(status){
+  fc.status=status;
+  const M = {
+    loading: ['⏳','Starting face check…',''],
+    noface:  ['🙂','Look at the camera — keep your face inside the oval',''],
+    multi:   ['👥','Only one person should be in the frame','bad'],
+    far:     ['🔍','Come a little closer to the camera',''],
+    checking:['🔎','Checking it is a real face…',''],
+    real:    ['✅','Real face detected — tap Take Selfie','ok'],
+    spoof:   ['⛔','Photo / screen detected — show your real face to the camera','bad'],
+    device:  ['⛔','A phone or screen is in front of the camera — not allowed','bad']
+  }[status] || ['','',''];
+  lvHud(M[0], M[1], M[2]);
+  const sc=$('#lvScore'); if(sc) sc.textContent = fc.hist.length ? 'score '+fcMedianReal().toFixed(2) : '';
+  const snapB=$('#camSnapBtn'); if(snapB){ snapB.disabled = status!=='real'; snapB.classList.toggle('is-off', status!=='real'); }
+}
+function fcRun(){
   const v=$('#camVideo');
-  lv.st = { seq: lvSequence(), idx:0, phase:'ready', readyN:0, base:null, t0:performance.now(), stepT0:0,
-            lastSeen:performance.now(), prev:null, sub:0, peak:{}, frames:0, lastTs:0, startedAt:Date.now() };
-  lvHud('🙂', 'Look straight at the camera, face inside the oval', '');
-  lvDots();
-  const loop = () => {
-    const s = lv.st; if(!s || !cam.stream || !v.isConnected) return;
-    lv.raf = requestAnimationFrame(loop);
-    if(!v.videoWidth || v.readyState < 2) return;
-    const now = performance.now();
-    if(now - s.lastTs < 50) return;                 // ~20 checks per second is plenty
-    s.lastTs = now;
-    let res; try{ res = lm.detectForVideo(v, now); }catch(e){ return; }
-    lvFrame(res, v.videoWidth, v.videoHeight, now);
-  };
-  lv.raf = requestAnimationFrame(loop);
-}
-function lvFail(msg){
-  const s=lv.st; lvStop(); stopCamOnly();
-  lv.fails++;
-  if(lv.fails >= LV.MAX_FAILS){ lv.lockUntil = Date.now()+LV.LOCK_MS; lv.fails=0;
-    msg += ` — locked for ${LV.LOCK_MS/1000}s`; }
-  lvHud('⛔', msg, 'bad'); lvProg(0);
-  camButtons('retry');
-  if(s){ s.failed=true; }
-  checkReady();
-}
-function lvFrame(res, W, H, now){
-  const s = lv.st; if(!s) return;
-  const faces = (res && res.faceLandmarks) || [];
-  if(faces.length > 1){
-    if(s.phase==='ready'){ s.readyN=0; return lvHud('👥', 'Only one person should be in the frame', ''); }
-    return lvFail('More than one face in view — only you should be in the frame');
-  }
-  if(!faces.length){
-    if(s.phase!=='ready' && now - s.lastSeen > LV.LOST_MS) return lvFail('Face lost — keep your face in the frame and try again');
-    if(s.phase==='ready'){ s.readyN=0; lvHud('🙂', 'No face found — look straight at the camera', ''); }
-    return;
-  }
-  const m = lvMetrics(faces[0], W, H), sh = lvShapes(res);
-  if(s.prev && s.phase!=='ready'){
-    const jump = Math.hypot(m.cx-s.prev.cx, m.cy-s.prev.cy);
-    if(jump > LV.MAX_JUMP || Math.abs(Math.log(m.iodRel/s.prev.iodRel)) > 0.45)
-      return lvFail('Face moved too suddenly — the check has been reset');
-  }
-  s.prev = m; s.lastSeen = now; s.frames++;
-
-  if(s.phase==='ready'){
-    if(m.iodRel < LV.MIN_IOD){ s.readyN=0; return lvHud('🔍', 'Come a little closer to the camera', ''); }
-    if(Math.abs(m.noseOff) > 0.12 || sh.open > 0.45){ s.readyN=0; return lvHud('🙂', 'Look straight at the camera with eyes open', ''); }
-    if(++s.readyN < 8) return lvHud('🙂', 'Hold still…', '');
-    s.base = { noseOff:m.noseOff, cheek:m.cheek, smile:sh.smile, iodRel:m.iodRel };
-    return lvNext(now);
-  }
-  if(s.phase==='step'){
-    const k = s.seq[s.idx];
-    lvProg(1 - (now - s.stepT0)/LV.STEP_MS);
-    if(now - s.stepT0 > LV.STEP_MS) return lvFail(k==='blink' ? 'No blink detected — a photo or screen cannot punch. Tap Retake and blink' : 'Time up — the action was not detected');
-    if(m.iodRel < LV.MIN_IOD*0.75) return lvHud('🔍', 'Come closer — '+LV_TEXT[k][1], '');
-    const dn = m.noseOff - s.base.noseOff, dc = m.cheek - s.base.cheek;
-    let done=false;
-    if(k==='blink'){
-      if(s.sub===0 && sh.open < 0.30) s.sub=1;                 // eyes seen open
-      else if(s.sub===1 && sh.blink > 0.55) s.sub=2;           // both eyes closed
-      else if(s.sub===2 && sh.open < 0.30) done=true;          // open again
-    } else if(k==='turnLeft' || k==='turnRight'){
-      const dir = k==='turnLeft' ? 1 : -1;
-      /* a flat photo being tilted: the cheeks squash but the nose stays centred */
-      if(dir*dc < -LV.TURN_CHEEK*1.3 && Math.abs(dn) < LV.FLAT_NOSE){ s.flat=(s.flat||0)+1;
-        if(s.flat > 6) return lvFail('Spoof suspected — a flat photo or screen was detected'); }
-      else s.flat=0;
-      if(dir*dn > LV.TURN_NOSE && dir*dc < -LV.TURN_CHEEK) done=true;
-    } else if(k==='smile'){
-      /* a smile only counts when it follows a neutral face — a smiling photo can never relax */
-      if(s.sub===0 && sh.smile < 0.30) s.sub=1;
-      else if(s.sub===1 && sh.smile > 0.60) done=true;
+  if(!v || !v.isConnected || !cam.stream || cam.photo){ fc.timer=0; return; }
+  fc.timer = setTimeout(fcRun, FC.TICK_MS);
+  if(fc.busy || !v.videoWidth || v.readyState<2 || document.hidden) return;
+  fc.busy=true;
+  try{
+    const now=performance.now(), W=v.videoWidth, H=v.videoHeight;
+    const res=fc.lm.detectForVideo(v, now), faces=(res&&res.faceLandmarks)||[];
+    if(fc.dev>0) fc.dev--;
+    if(!faces.length){ fc.hist=[]; return fcShow('noface'); }
+    if(faces.length>1){ fc.hist=[]; return fcShow('multi'); }
+    const box=fcBox(faces[0], W, H);
+    if(box.iodRel < FC.MIN_IOD){ return fcShow('far'); }
+    if(fc.od && (fc.n++ % 3 === 0)){
+      try{ const od=fc.od.detectForVideo(v, now+0.5); if(fcDeviceNearFace(od && od.detections, box)){ fc.dev=8; fc.hist=[]; } }catch(e){}
     }
-    if(done){ s.idx++; s.sub=0; s.flat=0; return lvNext(now); }
+    const sc=fcSpoof(v, W, H, box);
+    if(sc){ fc.hist.push(sc); if(fc.hist.length>FC.WINDOW) fc.hist.shift(); }
+    fc.lastBox=box;
+    fcShow(fcVerdict());
+  }catch(e){ /* a dropped frame is harmless */ }
+  finally{ fc.busy=false; }
+}
+
+/* ---- camera on / off, kept alive ---- */
+async function startCam(){
+  cam.wanted=true;
+  try{
+    stopCamOnly();
+    cam.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
+    const v=$('#camVideo'); if(!v || !cam.wanted){ stopCamOnly(); return false; }
+    v.srcObject=cam.stream; v.style.display='block'; try{ await v.play(); }catch(e){}
+    /* If the phone takes the camera away (screen lock, a call, another app), bring
+       it straight back instead of leaving a black box. */
+    cam.stream.getVideoTracks().forEach(t=>{ t.onended=()=>{ if(cam.wanted && !cam.photo && !document.hidden) setTimeout(()=>{ if(cam.wanted && !cam.photo) camResume(); }, 400); }; });
+    const c=$('#camCanvas'); if(c) c.style.display='none';
+    $('#camOff').style.display='none';
+    $('#camStartBtn').style.display='none';
+    $('#camSnapBtn').style.display='inline-flex';
+    $('#camRetakeBtn').style.display='none';
+    const d=$('#camDevBtn'); if(d) d.style.display='none';
+    fcShow('loading');
+    try{ await fcLoad(); }catch(e){ lvHud('⚠️', e.message, 'bad'); return true; }
+    if(cam.stream && !fc.timer){ fc.hist=[]; fc.dev=0; fcRun(); }
+    return true;
+  }catch(e){
+    cam.wanted=false;
+    toast('Camera access denied — please allow browser permission','err');
+    camButtons('start');
+    return false;
+  }
+}
+async function camResume(){
+  if(!$('#camVideo') || !cam.wanted || cam.photo) return;
+  const live = cam.stream && cam.stream.getVideoTracks().some(t=>t.readyState==='live');
+  if(!live){ await startCam(); return; }
+  const v=$('#camVideo'); if(v){ if(v.srcObject!==cam.stream) v.srcObject=cam.stream; try{ await v.play(); }catch(e){} }
+  if(!fc.timer && fc.lm) fcRun();
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && S && S.view==='punch') camResume(); });
+window.addEventListener('pageshow', ()=>{ if(S && S.view==='punch') camResume(); });
+
+function snap(){
+  const v=$('#camVideo'), c=$('#camCanvas');
+  if(!v || !v.videoWidth){ toast('Camera is still starting — try again in a second','err'); return; }
+  const verdict = fcVerdict();
+  if(verdict!=='real'){
+    toast(verdict==='device' || verdict==='spoof' ? '⛔ Photo / screen detected — only a real face can punch'
+          : 'Hold on — still checking it is a real face', 'err');
     return;
   }
-  if(s.phase==='final'){
-    lvProg(1 - (now - s.stepT0)/LV.STEP_MS);
-    if(now - s.stepT0 > LV.STEP_MS) return lvFail('Time up — look straight at the camera at the end');
-    if(Math.abs(m.noseOff - s.base.noseOff) < 0.10 && sh.open < 0.35 && m.iodRel >= LV.MIN_IOD*0.8){
-      if(++s.readyN >= 4) return lvPass();
-    } else s.readyN=0;
-  }
-}
-function lvNext(now){
-  const s = lv.st; s.stepT0 = now; s.readyN = 0;
-  if(s.idx >= s.seq.length){
-    if(s.seq.length===1) return lvPass();            // blink-only: capture right now
-    s.phase='final'; lvDots(); return lvHud('📸', 'Now look straight at the camera', 'go'); }
-  s.phase='step'; lvDots();
-  const t = LV_TEXT[s.seq[s.idx]];
-  lvHud(t[0], s.seq.length>1 ? `Step ${s.idx+1}/${s.seq.length}: ${t[1]}` : t[1], 'go');
-}
-function lvPass(){
-  const s = lv.st, v=$('#camVideo'), c=$('#camCanvas');
-  if(!v || !c || !v.videoWidth) return;
   const w=Math.min(640, v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
   c.width=w; c.height=h; c.classList.remove('unmirror');
   c.getContext('2d').drawImage(v,0,0,w,h);
   cam.photo = c.toDataURL('image/jpeg', 0.72); cam.photoSrc='live';
-  cam.live = { ok:true, at:Date.now(), seq:s.seq.slice(), ms:Math.round(performance.now()-s.t0), frames:s.frames };
-  lv.fails = 0;
-  lvStop(); c.style.display='block'; v.style.display='none'; stopCamOnly();
-  lvHud('✅', 'Blink verified — photo captured', 'ok'); lvProg(0); $('#lvDots').innerHTML='';
-  camButtons('done');
-  lvArmAutoPunch();
-  clearTimeout(lv.expTimer);
-  lv.expTimer = setTimeout(()=>{
-    if(!$('#punchBtn') || lvValid()) return;
-    lvCancelAuto(); cam.photo=null; cam.live=null; cam.photoSrc=null;
-    const cv=$('#camCanvas'); if(cv) cv.style.display='none';
-    lvHud('⌛', 'Face check expired — please do it again', 'bad'); camButtons('retry'); checkReady();
-  }, LV.VALID_MS + 500);
+  cam.live = { ok:true, at:Date.now(), seq:['passive-'+FC_MODE], ms:0, score:+fcMedianReal().toFixed(3) };
+  fcStop(); c.style.display='block'; v.style.display='none'; stopCamOnly();
+  lvHud('✅','Real face verified — selfie taken','ok');
+  $('#camSnapBtn').style.display='none'; $('#camRetakeBtn').style.display='inline-flex';
+  const d=$('#camDevBtn'); if(d) d.style.display = ocCanDeviceCapture() ? 'inline-flex' : 'none';
   checkReady();
 }
-/* After the photo: save the punch by itself. Accounts allowed to use the device
-   camera get 4 seconds to switch to it before the auto-punch fires. */
-function lvCancelAuto(){ clearTimeout(cam.autoTimer); cam.autoTimer=null; cam.autoPunch=false; }
-function lvArmAutoPunch(){
-  lvCancelAuto();
-  if(!needPhoto()) return;
-  if(ocCanDeviceCapture()){
-    let n=4;
-    const tick=()=>{
-      if(!$('#punchBtn') || !lvValid()) return lvCancelAuto();
-      if(n<=0){ cam.autoTimer=null; cam.autoPunch=true; lvHud('✅','Blink verified — saving punch…','ok'); return checkReady(); }
-      lvHud('✅', `Blink verified — punch saves in ${n}s (tap device camera to use it instead)`, 'ok'); n--;
-      cam.autoTimer=setTimeout(tick,1000);
-    };
-    tick();
-  } else { cam.autoPunch=true; checkReady(); }
+async function retake(){
+  cam.photo=null; cam.live=null; cam.photoSrc=null;
+  const c=$('#camCanvas'); if(c) c.style.display='none';
+  checkReady();
+  await startCam();
 }
-function stopCamOnly(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+function lvHud(icon, text, cls){
+  const h=$('#lvHud'); if(!h) return;
+  h.style.display = text ? 'flex' : 'none'; h.className='lv-hud '+(cls||'');
+  $('#lvIcon').textContent=icon||''; $('#lvText').textContent=text||'';
+}
 function camButtons(mode){
   const show=(id,on)=>{ const e=$(id); if(e) e.style.display=on?'inline-flex':'none'; };
-  show('#camStartBtn', mode==='start');
-  show('#camRetakeBtn', mode==='retry' || mode==='done');
-  show('#camDevBtn', mode==='done' && ocCanDeviceCapture());
-  const off=$('#camOff'); if(off) off.style.display = (mode==='start' && !cam.photo) ? '' : 'none';
-  if(mode!=='done'){ const cv=$('#camCanvas'); if(cv) cv.style.display='none'; }
-  if(mode==='start' || mode==='retry'){ const v=$('#camVideo'); if(v) v.style.display='none'; }
+  show('#camStartBtn', mode==='start'); show('#camSnapBtn', false); show('#camRetakeBtn', false); show('#camDevBtn', false);
+  const off=$('#camOff'); if(off) off.style.display = mode==='start' ? '' : 'none';
+  const v=$('#camVideo'); if(v) v.style.display='none';
+  const cv=$('#camCanvas'); if(cv) cv.style.display='none';
+  lvHud('','','');
 }
+function selfieFresh(){ return !!(cam.photo && cam.live && cam.live.ok && (Date.now()-cam.live.at) <= FC.SELFIE_MAX_AGE); }
 
 /* ---- direct device-camera capture — mis@oakcraft.in only ----
-   Opens the phone's own camera app (higher quality photo). Allowed only AFTER the
-   live check has passed, only within its 2-minute window, only for a photo taken
-   just now (an old gallery picture is refused) and only with exactly one face. */
+   Opens the phone's own camera app. Allowed only after a live selfie has passed the
+   real-face check, only for a photo taken just now (an old gallery picture is
+   refused), and the photo itself must also pass the real-face check. */
 function devCapOpen(){
   if(!ocCanDeviceCapture()) return;
-  lvCancelAuto();
-  if(!lvValid()){ toast('Complete the live face check first','err'); return; }
+  if(!selfieFresh()){ toast('Take the live selfie first','err'); return; }
   const i=$('#camDevInput'); if(i) i.click();
 }
 async function devCapPick(inp){
   const f = inp.files && inp.files[0]; inp.value='';
   if(!f || !ocCanDeviceCapture()) return;
-  lvCancelAuto();
-  if(!lvValid()){ toast('Face check expired — do the live check again','err'); return; }
+  if(!selfieFresh()){ toast('Selfie expired — take the live selfie again','err'); return; }
   if(!/^image\//i.test(f.type||'')){ toast('That is not a photo','err'); return; }
-  if(!f.lastModified || Math.abs(Date.now()-f.lastModified) > LV.VALID_MS){
+  if(!f.lastModified || Math.abs(Date.now()-f.lastModified) > 120000){
     toast('Use a photo taken just now with the camera — saved photos are not allowed','err'); return; }
   const url = URL.createObjectURL(f);
   try{
@@ -1637,21 +1619,30 @@ async function devCapPick(inp){
     const sc = Math.min(1, 800/Math.max(img.width,img.height));
     const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
     const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h; tmp.getContext('2d').drawImage(img,0,0,w,h);
-    const lm = await lvLoad();
+    await fcLoad();
     let res;
-    try{ await lm.setOptions({runningMode:'IMAGE'}); res = lm.detect(tmp); }
-    finally{ try{ await lm.setOptions({runningMode:'VIDEO'}); }catch(e){} }
+    try{ await fc.lm.setOptions({runningMode:'IMAGE'}); res = fc.lm.detect(tmp); }
+    finally{ try{ await fc.lm.setOptions({runningMode:'VIDEO'}); }catch(e){} }
     const faces = (res && res.faceLandmarks) || [];
     if(faces.length !== 1){ toast(faces.length ? 'Only one face may be in the photo' : 'No face found in the photo — try again','err'); return; }
-    if(lvMetrics(faces[0], w, h).iodRel < 0.08){ toast('Face is too small — hold the phone closer','err'); return; }
+    const box = fcBox(faces[0], w, h);
+    if(box.iodRel < 0.06){ toast('Face is too small — hold the phone closer','err'); return; }
+    const s = fcSpoof(tmp, w, h, box);
+    if(FC_MODE==='strict' && (!s || s.real < FC.REAL_MIN)){ toast('⛔ Photo / screen detected — use your real face','err'); return; }
     const c=$('#camCanvas'); if(!c) return;
     c.width=w; c.height=h; c.getContext('2d').drawImage(tmp,0,0); c.classList.add('unmirror'); c.style.display='block';
     cam.photo = tmp.toDataURL('image/jpeg', 0.78); cam.photoSrc='device';
-    lvHud('✅', 'Blink verified · photo from device camera — saving punch…', 'ok');
-    cam.autoPunch=true;
+    lvHud('✅', 'Real face verified · photo from device camera', 'ok');
     checkReady();
   }catch(e){ toast(e.message||'Could not use that photo','err'); }
   finally{ URL.revokeObjectURL(url); }
+}
+
+/* While the camera is running or a selfie is waiting, a background refresh must not
+   redraw this screen — that is what used to turn the camera box black. */
+function ocPunchBusy(){ return !!($('#punchBtn') && (cam.wanted || cam.photo || cam.punching)); }
+function refreshPunchSide(){
+  const el=$('#todayPunches'); if(el) el.innerHTML = renderPunchList((S.today&&S.today.punches)||[]);
 }
 
 async function renderPunch(){
@@ -1659,29 +1650,29 @@ async function renderPunch(){
   /* The canvas is rebuilt empty every time this screen is drawn, so a selfie left
      over from a previous visit would enable the punch button with nothing on
      screen to show for it. */
-  cam.photo=null; cam.live=null; cam.photoSrc=null; cam.inside=undefined; cam.geo=null; stopCam(); clearTimeout(lv.expTimer);
+  cam.photo=null; cam.live=null; cam.photoSrc=null; cam.inside=undefined; cam.geo=null; cam.punching=false; stopCam();
   const nextType = !t.punchedIn ? 'Punch In' : 'Punch Out';
   const staff = needPhoto();
   const devCap = staff && ocCanDeviceCapture();
   const camCard = staff ? `
     <div class="card cam-card">
       <div class="cam-stage">
-        <div class="cam-off" id="camOff"><span class="ic">📷</span>Tap the button, look at the camera and <b>blink</b><br><small>Your photo is taken and the punch is saved automatically — photos and screens are rejected</small></div>
+        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the camera<br><small>Only a real face can punch — photos and phone screens are rejected</small></div>
         <video id="camVideo" autoplay playsinline muted style="display:none"></video>
         <canvas id="camCanvas"></canvas>
         <div class="lv-oval" id="lvOval"></div>
-        <div class="lv-hud" id="lvHud" style="display:none"><span class="lv-ic" id="lvIcon"></span><span id="lvText"></span>
-          <div class="lv-dots" id="lvDots"></div><div class="lv-bar"><i id="lvProg"></i></div></div>
+        <div class="lv-hud" id="lvHud" style="display:none"><span class="lv-ic" id="lvIcon"></span><span id="lvText"></span><small id="lvScore" style="opacity:.6;font-weight:600"></small></div>
       </div>
       <div class="cam-bar">
-        <button class="btn btn-gold" id="camStartBtn" onclick="lvStart()">👁️ ${nextType} — blink to punch</button>
+        <button class="btn btn-gold" id="camStartBtn" onclick="startCam()">📷 Camera On</button>
+        <button class="btn btn-p is-off" id="camSnapBtn" onclick="snap()" style="display:none" disabled>📸 Take Selfie</button>
         <button class="btn btn-o" id="camRetakeBtn" onclick="retake()" style="display:none">↺ Retake</button>
-        ${devCap?`<button class="btn btn-p" id="camDevBtn" onclick="devCapOpen()" style="display:none">📱 Take photo with device camera</button>
+        ${devCap?`<button class="btn btn-p" id="camDevBtn" onclick="devCapOpen()" style="display:none">📱 Device camera</button>
         <input type="file" id="camDevInput" accept="image/*" capture="user" hidden onchange="devCapPick(this)">`:''}
       </div>
     </div>` : '';
   $('#main').innerHTML = `
-  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Tap, blink — selfie + punch save automatically · within 100 m of office (Staff rule)':'One button — live location within 100 m of office (Labour rule)'}</div></div></div>
+  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Punch with a selfie + live location within 100 m of office (Staff rule)':'One button — live location within 100 m of office (Labour rule)'}</div></div></div>
   <div class="punch-wrap" ${staff?'':'style="grid-template-columns:1fr;max-width:520px"'}>
     ${camCard}
     <div>
@@ -1692,7 +1683,7 @@ async function renderPunch(){
         <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
         <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
           ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
-        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Tap the camera button and blink — punch saves by itself':'Waiting for GPS lock…'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Take a selfie and wait for GPS lock':'Waiting for GPS lock…'}</div>
       </div>
       <div class="card" style="margin-top:16px"><h3>Today's punches</h3>
         <div class="timeline" id="todayPunches">${renderPunchList(t.punches||[])}</div></div>
@@ -1700,7 +1691,7 @@ async function renderPunch(){
   </div>`;
   tickClock(); if(window._clk) clearInterval(window._clk); window._clk=setInterval(tickClock,1000);
   getGPS();
-  if(staff) lvLoad().catch(()=>{});     // warm the face model up while GPS locks
+  if(staff) fcLoad().catch(()=>{});     // warm the face check up while GPS locks
 }
 function renderPunchList(punches){
   if(!punches.length) return '<div class="empty" style="padding:20px">No punches today yet</div>';
@@ -1711,31 +1702,6 @@ function renderPunchList(punches){
 function tickClock(){ const n=new Date(); const el=$('#liveClock'); if(!el){clearInterval(window._clk);return;}
   el.innerHTML=n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+`<small> ${n.toLocaleTimeString('en-IN',{second:'2-digit'}).padStart(2,'0')}s</small>`;
   $('#liveDate').textContent=n.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}); }
-async function startCam(){
-  try{
-    cam.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
-    const v=$('#camVideo'); if(!v){ stopCamOnly(); return false; }
-    v.srcObject=cam.stream; v.style.display='block';
-    const c=$('#camCanvas'); if(c) c.style.display='none';
-    $('#camOff').style.display='none';
-    return true;
-  }catch(e){
-    toast('Camera access denied — please allow browser permission','err');
-    /* put the screen back the way it was, so the person is not left with no camera */
-    camButtons('start');
-    return false;
-  }
-}
-/* The old manual "Take Selfie" path is gone on purpose: a selfie is only ever
-   taken by the live check itself, so it cannot be skipped. */
-function snap(){ lvStart(); }
-async function retake(){
-  lvCancelAuto();
-  cam.photo=null; cam.live=null; cam.photoSrc=null;
-  const c=$('#camCanvas'); if(c) c.style.display='none';
-  checkReady();
-  await lvStart();
-}
 /* ================= LOCATION — robust multi-stage GPS =================
    PURANI PROBLEM: sirf ek getCurrentPosition({enableHighAccuracy:true, timeout:15000}).
    Andar baithe employee ko 15 sec me satellite fix nahi milta -> TIMEOUT -> permanent
@@ -1749,7 +1715,7 @@ const GEO_MAX_RADIUS = 100;    // metres — hard ceiling, Settings me zyada lik
 const GEO_MAX_ACC    = 50;     // metres — isse kharaab accuracy par punch nahi
 const GEO_FIX_MAX_AGE= 30000;  // ms — punch ke liye location itni purani se zyada nahi
 const GPS_GOOD_ACC  = 20;      // metres — itni accuracy mil gayi to refine band
-const GPS_REFINE_MS = 90000;   // itni der tak accuracy improve karte rahenge
+const GPS_REFINE_MS = 600000;  // screen khula rahe to 10 min tak location taaza rakhte hain
 let gpsWatchId=null, gpsHardTimer=null, gpsLastFix=null;
 
 function stopGPS(){
@@ -1808,8 +1774,7 @@ function gpsRefine(){
   gpsWatchId = navigator.geolocation.watchPosition(
     p=>{ const acc=Math.round(p.coords.accuracy||0);
          if(gpsLastFix && acc > 3*(gpsLastFix.coords.accuracy||1)) return;  // clearly kharaab fix ignore
-         gpsApply(p, true);
-         if(acc <= GPS_GOOD_ACC) stopGPS(); },
+         gpsApply(p, acc > GPS_GOOD_ACC); },   /* keep watching while this screen is open, so the fix is always fresh at punch time */
     err=>{ if(!cam.pos) gpsShow(gpsErrText(err),'err');   // ek bhi fix nahi mila tabhi error dikhao
            if(err.code===1) stopGPS(); },
     {enableHighAccuracy:true, timeout:30000, maximumAge:0}
@@ -1834,6 +1799,8 @@ function getGPS(){
 /* A brand-new high-accuracy fix taken at the moment of punching. Falls back to the
    last fix only if it is less than 30 s old. */
 function gpsFreshFix(){
+  /* the screen keeps a live GPS watch running, so a fix from the last 10 s is "now" */
+  if(gpsLastFix && (Date.now() - (gpsLastFix.timestamp||0)) <= 10000) return Promise.resolve(gpsLastFix);
   return new Promise((ok, no)=>{
     const fallback = e => {
       if(gpsLastFix && (Date.now() - (gpsLastFix.timestamp||0)) <= GEO_FIX_MAX_AGE) ok(gpsLastFix);
@@ -1850,29 +1817,25 @@ function gpsFreshFix(){
 }
 function checkReady(){
   const staff = needPhoto();
-  const photoOk = !staff || (!!cam.photo && lvValid());
+  const photoOk = !staff || selfieFresh();
   const zoneOk = cam.inside === true;
   const ok = photoOk && cam.pos && zoneOk;
   const b=$('#punchBtn'); if(!b) return;
   b.disabled=!ok;
-  if(ok && cam.autoPunch && !cam.punching){ cam.autoPunch=false; $('#punchHint').textContent='Saving punch automatically…'; setTimeout(doPunch, 250); return; }
-  if(!ok && cam.autoPunch && cam.photo && lvValid()){ $('#punchHint').textContent = !cam.pos ? 'Photo ready — punch will save as soon as GPS locks'
-      : (cam.geo && cam.geo.reason==='acc') ? `Photo ready — waiting for GPS accuracy of ±${GEO_MAX_ACC}m` : `Reach within ${(cam.geo&&cam.geo.radius)||GEO_MAX_RADIUS}m of the office to punch`; return; }
   $('#punchHint').textContent = ok ? 'All set — tap to punch ✅'
     : !cam.pos ? 'Waiting for GPS lock…'
     : (cam.geo && cam.geo.reason==='acc') ? `Waiting for GPS accuracy of ±${GEO_MAX_ACC}m or better`
     : !zoneOk ? `Reach within ${(cam.geo&&cam.geo.radius)||GEO_MAX_RADIUS}m of the office to punch`
-    : 'Blink check still required';
+    : (cam.photo ? 'Selfie is more than 3 minutes old — tap Retake' : 'Selfie still required');
 }
 async function doPunch(){
   const b=$('#punchBtn'); if(!b || cam.punching) return;
-  cam.punching=true; cam.autoPunch=false;
+  cam.punching=true;
   const label=b.innerHTML; b.disabled=true;
   const restore = () => { cam.punching=false; b.innerHTML=label; checkReady(); };
-  /* 1 — the live face check must still be valid (2-minute window) */
-  if(needPhoto() && !(cam.photo && lvValid())){
-    toast('Live face check expired — please do it again','err');
-    cam.photo=null; cam.live=null; restore(); return;
+  /* 1 — the real-face selfie must still be fresh (about 3 minutes) */
+  if(needPhoto() && !selfieFresh()){
+    toast('Selfie is more than 3 minutes old — tap Retake and take it again','err'); restore(); return;
   }
   /* 2 — location is taken again NOW and checked again, strictly */
   b.innerHTML='<span class="spin"></span> Verifying location…';
@@ -1886,13 +1849,13 @@ async function doPunch(){
                             : `⛔ You are ${Math.round(ge.dist)}m from office — punch allowed only within ${ge.radius}m`, 'err');
     restore(); return;
   }
-  if(needPhoto() && !lvValid()){ toast('Live face check expired — please do it again','err'); cam.photo=null; cam.live=null; restore(); return; }
+  if(needPhoto() && !selfieFresh()){ toast('Selfie is more than 3 minutes old — tap Retake and take it again','err'); restore(); return; }
   b.innerHTML='<span class="spin"></span> Saving…';
   try{
     const r = await api('punch', {photoBase64:cam.photo, lat:cam.pos.lat, lng:cam.pos.lng, accuracy:cam.pos.accuracy,
       device:navigator.userAgent.slice(0,110),
       /* extra proof for the backend (ignored by an old backend, see APPS_SCRIPT_PATCH.md) */
-      liveness: needPhoto() && cam.live ? { passed:true, at:new Date(cam.live.at).toISOString(), steps:cam.live.seq.join(','), ms:cam.live.ms } : null,
+      liveness: needPhoto() && cam.live ? { passed:true, at:new Date(cam.live.at).toISOString(), steps:cam.live.seq.join(','), score:cam.live.score } : null,
       photoSource: needPhoto() ? (cam.photoSrc||'live') : 'none',
       distanceM: ge.none ? null : Math.round(ge.dist), radiusM: ge.none ? null : ge.radius,
       /* sent on every punch. A backend that ignores them loses nothing; one that
@@ -3157,7 +3120,12 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(function(){});
     var reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function(){
-      if(reloading) return; reloading = true; location.reload();
+      if(reloading) return; reloading = true;
+      /* never pull the page out from under someone who is taking a selfie / punching */
+      (function tryReload(){
+        if(typeof ocPunchBusy === 'function' && ocPunchBusy()){ setTimeout(tryReload, 4000); return; }
+        location.reload();
+      })();
     });
     setTimeout(ocOutboxFlush, 1500);
   });
