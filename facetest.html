@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Face check test</title>
+<meta name="robots" content="noindex">
+<style>
+body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f19;color:#e8ecf3}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:18px;margin:4px 0 12px}
+.stage{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3}
+video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#verdict{margin:12px 0;padding:14px;border-radius:12px;font-size:20px;font-weight:800;text-align:center;background:#1c2536}
+#verdict.real{background:#0b5d1e}#verdict.spoof,#verdict.device{background:#7a1414}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:14px}
+td,th{padding:6px 8px;border-bottom:1px solid #263047;text-align:left}
+button{font:inherit;font-weight:700;padding:12px 18px;border-radius:12px;border:0;background:#e8b34b;color:#111;width:100%;margin-top:12px}
+small{color:#9aa4b8}
+</style></head><body><main>
+<h1>Real-face check — test page</h1>
+<small>Only for testing. Nothing is saved or sent anywhere.</small>
+<div class="stage"><video id="v" autoplay playsinline muted></video></div>
+<div id="verdict">Press Start</div>
+<table><tbody id="tb"></tbody></table>
+<button id="go">📷 Start camera</button>
+<script>
+const MP='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const TFJS='https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
+const FACE='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const OBJ='https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite';
+const NETS=[{url:'models/antispoof/2.7_80x80_MiniFASNetV2/model.json',scale:2.7},{url:'models/antispoof/4_0_0_80x80_MiniFASNetV1SE/model.json',scale:4.0}];
+const $=s=>document.querySelector(s);
+let lm,od,tf,nets=[],hist=[],dev=0,n=0,log=[];
+window.__fcLog=log;
+function crop(W,H,b,scale){const s=Math.max(.1,Math.min((H-1)/b.h,(W-1)/b.w,scale));const nw=b.w*s,nh=b.h*s,cx=b.x+b.w/2,cy=b.y+b.h/2;
+ let l=cx-nw/2,t=cy-nh/2,r=cx+nw/2,d=cy+nh/2;if(l<0){r-=l;l=0}if(t<0){d-=t;t=0}if(r>W-1){l-=r-W+1;r=W-1}if(d>H-1){t-=d-H+1;d=H-1}
+ const x=Math.max(0,Math.round(l)),y=Math.max(0,Math.round(t));return{x,y,w:Math.max(2,Math.round(r)-x+1),h:Math.max(2,Math.round(d)-y+1)}}
+const cv=document.createElement('canvas');cv.width=cv.height=80;const cx=cv.getContext('2d',{willReadFrequently:true});
+function score(v,W,H,b){return nets.map(m=>{const c=crop(W,H,b,m.scale);cx.drawImage(v,c.x,c.y,c.w,c.h,0,0,80,80);
+ const px=cx.getImageData(0,0,80,80).data,P=6400,a=new Float32Array(P*3);for(let i=0;i<P;i++){a[i]=px[i*4+2];a[P+i]=px[i*4+1];a[2*P+i]=px[i*4]}
+ const lg=tf.tidy(()=>{const o=m.net.predict(tf.tensor4d(a,[1,3,80,80]));return(Array.isArray(o)?o[0]:o).dataSync().slice(0,3)});
+ const mx=Math.max(...lg),e=lg.map(z=>Math.exp(z-mx)),s=e[0]+e[1]+e[2];return e.map(z=>z/s)})}
+function load(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=no;document.head.appendChild(s)})}
+$('#go').onclick=async()=>{
+ $('#go').disabled=true;$('#verdict').textContent='Loading…';
+ const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
+ const v=$('#v');v.srcObject=st;await v.play().catch(()=>{});
+ const mp=await import(MP+'/vision_bundle.mjs');const fs=await mp.FilesetResolver.forVisionTasks(MP+'/wasm');
+ lm=await mp.FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:FACE,delegate:'GPU'},runningMode:'VIDEO',numFaces:2});
+ try{od=await mp.ObjectDetector.createFromOptions(fs,{baseOptions:{modelAssetPath:OBJ,delegate:'GPU'},runningMode:'VIDEO',scoreThreshold:.25,maxResults:5,categoryAllowlist:['cell phone','tv','laptop']})}catch(e){od=null}
+ await load(TFJS);tf=window.tf;await tf.ready();nets=await Promise.all(NETS.map(async m=>({scale:m.scale,net:await tf.loadGraphModel(m.url)})));
+ $('#go').style.display='none';
+ const tick=()=>{setTimeout(tick,160);if(!v.videoWidth)return;const now=performance.now(),W=v.videoWidth,H=v.videoHeight;
+  const r=lm.detectForVideo(v,now),f=r.faceLandmarks||[];if(dev>0)dev--;
+  if(f.length!==1){$('#verdict').textContent=f.length?'More than one face':'No face';$('#verdict').className='';hist=[];return}
+  let x0=1,y0=1,x1=0,y1=0;for(const p of f[0]){x0=Math.min(x0,p.x);y0=Math.min(y0,p.y);x1=Math.max(x1,p.x);y1=Math.max(y1,p.y)}
+  const b={x:x0*W,y:y0*H,w:(x1-x0)*W,h:(y1-y0)*H},iod=Math.hypot((f[0][263].x-f[0][33].x)*W,(f[0][263].y-f[0][33].y)*H)/W;
+  let devTxt='—';if(od&&(n++%3===0)){const d=(od.detectForVideo(v,now+.5).detections||[]);devTxt=d.map(x=>x.categories[0].categoryName+' '+x.categories[0].score.toFixed(2)).join(', ')||'none';
+   const c={x:b.x+b.w/2,y:b.y+b.h/2};if(d.some(x=>{const bb=x.boundingBox;return c.x>bb.originX-bb.width*.15&&c.x<bb.originX+bb.width*1.15&&c.y>bb.originY-bb.height*.15&&c.y<bb.originY+bb.height*1.15}))dev=8}
+  const s=score(v,W,H,b),fused=[0,1,2].map(k=>(s[0][k]+s[1][k])/2);hist.push(fused[1]);if(hist.length>8)hist.shift();
+  const sorted=[...hist].sort((a,b)=>a-b),med=sorted[Math.floor(sorted.length/2)],ratio=hist.filter(z=>z>=.6).length/hist.length;
+  const verdict=dev>0?'device':hist.length<5?'checking':(med>=.6&&ratio>=.7?'real':'spoof');
+  $('#verdict').className=verdict;$('#verdict').textContent={real:'✅ REAL FACE',spoof:'⛔ PHOTO / SCREEN',device:'⛔ PHONE / SCREEN SEEN',checking:'Checking…'}[verdict];
+  log.push({t:Date.now(),v:verdict,real:+fused[1].toFixed(3),screen:+fused[2].toFixed(3),paper:+fused[0].toFixed(3),v2:+s[0][1].toFixed(3),v1se:+s[1][1].toFixed(3),iod:+iod.toFixed(3)});if(log.length>400)log.shift();
+  $('#tb').innerHTML=`<tr><th>Real / Screen / Paper (fused)</th><td>${[fused[1],fused[2],fused[0]].map(z=>z.toFixed(2)).join(' / ')}</td></tr>
+   <tr><th>MiniFASNetV2 real</th><td>${s[0][1].toFixed(2)}</td></tr><tr><th>MiniFASNetV1SE real</th><td>${s[1][1].toFixed(2)}</td></tr>
+   <tr><th>Median real (last 8)</th><td>${med.toFixed(2)}</td></tr><tr><th>Phone / screen objects</th><td>${devTxt}</td></tr><tr><th>Face size</th><td>${iod.toFixed(3)}</td></tr>`;
+ };tick();
+};
+</script></main></body></html>
