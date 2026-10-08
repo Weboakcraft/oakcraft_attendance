@@ -166,6 +166,23 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 .cam-off{color:rgba(255,255,255,.5);text-align:center;font-size:13.5px;padding:20px}
 .cam-off .ic{font-size:40px;display:block;margin-bottom:10px}
 .cam-bar{display:flex;gap:10px;padding:14px;background:rgba(10,14,23,.92);align-items:center;justify-content:center;flex-wrap:wrap}
+#camCanvas.unmirror{transform:none;object-fit:contain}
+.cam-off small{display:block;margin-top:8px;font-size:11.5px;opacity:.8}
+.lv-oval{position:absolute;left:50%;top:46%;width:46%;aspect-ratio:3/4;transform:translate(-50%,-50%);border:2.5px dashed rgba(255,255,255,.35);border-radius:50%;pointer-events:none;display:none}
+#camVideo[style*="block"]~.lv-oval{display:block}
+.lv-hud{position:absolute;left:10px;right:10px;top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:rgba(8,12,22,.82);color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:11px 13px;font-size:14px;font-weight:650;backdrop-filter:blur(6px);line-height:1.35}
+.lv-hud .lv-ic{font-size:19px;flex:none}
+.lv-hud #lvText{flex:1 1 0;min-width:0}
+@media(max-width:600px){.lv-hud{font-size:12.5px;padding:8px 10px;gap:6px}.lv-hud .lv-ic{font-size:16px}}
+.lv-hud.go{border-color:rgba(250,178,25,.7)}
+.lv-hud.ok{border-color:rgba(12,163,12,.85);background:rgba(6,60,20,.85)}
+.lv-hud.bad{border-color:rgba(227,73,72,.85);background:rgba(80,10,10,.85)}
+.lv-dots{display:flex;gap:5px;margin-left:auto}
+.lv-dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.25)}
+.lv-dots i.now{background:var(--gold,#f5b301)}
+.lv-dots i.done{background:#22c55e}
+.lv-bar{flex-basis:100%;height:3px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
+.lv-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#f5b301);transition:width .1s linear}
 .gps-row{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink2);background:var(--surface2);border:1px solid var(--hairline);border-radius:11px;padding:10px 13px;margin-top:12px}
 .gps-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
 .gps-dot.ok{background:var(--good);box-shadow:0 0 0 4px rgba(12,163,12,.15);animation:pulse 1.8s infinite}
@@ -1316,34 +1333,326 @@ function teamTodayTable(rows){
 function errView(e){ $('#main').innerHTML=`<div class="card empty"><div class="ic">⚠️</div>${esc(e.message)}<br><br><button class="btn btn-o" onclick="go(S.view)">Retry</button></div>`; }
 
 /* ================= PUNCH ================= */
-let cam={stream:null, photo:null, pos:null};
+let cam={stream:null, photo:null, pos:null, live:null, photoSrc:null, inside:undefined, geo:null};
 function needPhoto(){ return String(S.profile.type||'Staff').toLowerCase()==='staff'; } // Staff → selfie mandatory; Labour/Worker → location only
 function haversineM(la1,lo1,la2,lo2){ const R=6371000,r=Math.PI/180,dLa=(la2-la1)*r,dLo=(lo2-lo1)*r;
   const a=Math.sin(dLa/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2; return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
-function stopCam(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+function stopCam(){ lvStop(); if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+
+/* Direct device-camera capture (the phone's own camera app) is offered to these
+   accounts only. Everyone else never sees the button and the handler refuses. */
+const DEVICE_CAPTURE_EMAILS = ['mis@oakcraft.in'];
+function ocCanDeviceCapture(){
+  const em = String((S.profile && S.profile.email) || '').trim().toLowerCase();
+  return !!em && DEVICE_CAPTURE_EMAILS.includes(em);
+}
+
+/* ================= LIVENESS / ANTI-SPOOFING =================
+   A selfie alone proves nothing — a photo held up on another phone looks the same
+   to a camera. So before any selfie is accepted the person in front of the camera
+   has to pass a live check, in a RANDOM order that changes on every attempt:
+     • Blink            — a printed or on-screen photo cannot close its eyes
+     • Turn left/right  — checked with real 3-D parallax: when a real head turns,
+                          the nose moves sideways against the eyes and one cheek
+                          disappears. A flat photo or phone screen that is tilted
+                          only squashes evenly — the nose stays on the midline —
+                          so it can never pass, whatever the face model "thinks"
+     • Smile
+   The face is tracked the whole time: if it disappears, a second face shows up,
+   or it jumps (a phone swapped in) the check restarts from zero. The selfie is
+   taken automatically at the end, from the same live stream, so no one can pass
+   with one face and photograph another. A pass is valid for 2 minutes.            */
+const LV = {
+  MP_VER: '0.10.14',
+  MODEL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  VALID_MS: 120000,   // a passed check stays valid for 2 minutes
+  STEP_MS: 9000,      // time allowed for each challenge
+  MIN_IOD: 0.10,      // eye-to-eye distance must be ≥10% of the frame width (face close enough)
+  TURN_NOSE: 0.15,    // sideways nose shift, in eye-widths, that only a real 3-D head produces
+  TURN_CHEEK: 0.35,   // change in log(left cheek / right cheek) width during the turn
+  FLAT_NOSE: 0.08,    // turned the face but the nose barely moved = flat picture
+  MAX_JUMP: 0.18,     // face centre may not jump more than 18% of the frame between frames
+  LOST_MS: 700,       // face may vanish this long before the check is reset
+  MAX_FAILS: 3, LOCK_MS: 30000
+};
+const LV_TEXT = {
+  blink:     ['👁️', 'Blink your eyes slowly'],
+  turnLeft:  ['⬅️', 'Slowly turn your head to your LEFT'],
+  turnRight: ['➡️', 'Slowly turn your head to your RIGHT'],
+  smile:     ['😁', 'Relax your face, then give a big smile']
+};
+let lv = { lm:null, loading:null, raf:0, st:null, fails:0, lockUntil:0, expTimer:null };
+
+function lvLoad(){
+  if(lv.lm) return Promise.resolve(lv.lm);
+  if(lv.loading) return lv.loading;
+  lv.loading = (async()=>{
+    const bases = [`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${LV.MP_VER}`,
+                   `https://unpkg.com/@mediapipe/tasks-vision@${LV.MP_VER}`];
+    let last;
+    for(const b of bases){
+      try{
+        const mp = await import(b + '/vision_bundle.mjs');
+        const files = await mp.FilesetResolver.forVisionTasks(b + '/wasm');
+        const opts = d => ({ baseOptions:{ modelAssetPath:LV.MODEL, delegate:d }, runningMode:'VIDEO', numFaces:2,
+          outputFaceBlendshapes:true, minFaceDetectionConfidence:0.6, minFacePresenceConfidence:0.6, minTrackingConfidence:0.6 });
+        let lm;
+        try{ lm = await mp.FaceLandmarker.createFromOptions(files, opts('GPU')); }
+        catch(e){ lm = await mp.FaceLandmarker.createFromOptions(files, opts('CPU')); }
+        lv.lm = lm; return lm;
+      }catch(e){ last = e; }
+    }
+    lv.loading = null;
+    throw new Error('Face check could not load — check the internet connection and try again');
+  })();
+  return lv.loading;
+}
+function lvValid(){ return !!(cam.live && cam.live.ok && (Date.now() - cam.live.at) <= LV.VALID_MS); }
+function lvStop(){ if(lv.raf){ cancelAnimationFrame(lv.raf); lv.raf=0; } lv.st=null; }
+function lvShuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function lvSequence(){
+  const turn = Math.random()<0.5 ? 'turnLeft' : 'turnRight';
+  const other = turn==='turnLeft' ? 'turnRight' : 'turnLeft';
+  const third = Math.random()<0.5 ? 'smile' : other;
+  return lvShuffle(['blink', turn, third]);
+}
+/* geometry of one face, measured in image pixels (not the model's own 3-D guess) */
+function lvMetrics(L, W, H){
+  const P = i => ({ x:L[i].x*W, y:L[i].y*H });
+  const rEye=P(33), lEye=P(263), nose=P(1), rCheek=P(234), lCheek=P(454);
+  const iod = Math.hypot(lEye.x-rEye.x, lEye.y-rEye.y) || 1;
+  const ux=(lEye.x-rEye.x)/iod, uy=(lEye.y-rEye.y)/iod;
+  const mx=(rEye.x+lEye.x)/2, my=(rEye.y+lEye.y)/2;
+  const noseOff = ((nose.x-mx)*ux + (nose.y-my)*uy) / iod;          // + = towards the person's left
+  const dR = Math.hypot(nose.x-rCheek.x, nose.y-rCheek.y), dL = Math.hypot(nose.x-lCheek.x, nose.y-lCheek.y);
+  const cheek = Math.log((dL+1)/(dR+1));                             // − = person's left cheek hidden
+  return { iodRel: iod/W, cx: mx/W, cy: my/H, noseOff, cheek };
+}
+function lvShapes(res){
+  const out = {}; const c = res.faceBlendshapes && res.faceBlendshapes[0];
+  if(c && c.categories) c.categories.forEach(k => out[k.categoryName] = k.score);
+  return { blink: Math.min(out.eyeBlinkLeft||0, out.eyeBlinkRight||0),
+           open:  Math.max(out.eyeBlinkLeft||0, out.eyeBlinkRight||0),
+           smile: ((out.mouthSmileLeft||0) + (out.mouthSmileRight||0)) / 2 };
+}
+function lvHud(icon, text, cls){
+  const h=$('#lvHud'); if(!h) return;
+  h.style.display='flex'; h.className='lv-hud '+(cls||'');
+  $('#lvIcon').textContent=icon||''; $('#lvText').textContent=text||'';
+}
+function lvDots(){
+  const d=$('#lvDots'), s=lv.st; if(!d||!s) return;
+  d.innerHTML = s.seq.map((k,i)=>`<i class="${i<s.idx?'done':i===s.idx&&s.phase==='step'?'now':''}"></i>`).join('');
+}
+function lvProg(frac){ const p=$('#lvProg'); if(p) p.style.width=Math.max(0,Math.min(1,frac))*100+'%'; }
+
+async function lvStart(){
+  stopCamOnly();
+  cam.live=null; cam.photo=null; cam.photoSrc=null; checkReady();
+  if(Date.now() < lv.lockUntil){
+    const s=Math.ceil((lv.lockUntil-Date.now())/1000);
+    lvHud('⏳', `Too many failed attempts — try again in ${s}s`, 'bad'); camButtons('start'); return;
+  }
+  camButtons('busy');
+  lvHud('⏳', 'Loading face check…', '');
+  let lm;
+  try{ lm = await lvLoad(); }
+  catch(e){ lvHud('⚠️', e.message, 'bad'); camButtons('start'); return; }
+  if(!$('#camVideo')) return;                       // left the screen while loading
+  const ok = await startCam(); if(!ok){ lvHud('', '', ''); $('#lvHud').style.display='none'; return; }
+  const v=$('#camVideo');
+  lv.st = { seq: lvSequence(), idx:0, phase:'ready', readyN:0, base:null, t0:performance.now(), stepT0:0,
+            lastSeen:performance.now(), prev:null, sub:0, peak:{}, frames:0, lastTs:0, startedAt:Date.now() };
+  lvHud('🙂', 'Look straight at the camera, face inside the oval', '');
+  lvDots();
+  const loop = () => {
+    const s = lv.st; if(!s || !cam.stream || !v.isConnected) return;
+    lv.raf = requestAnimationFrame(loop);
+    if(!v.videoWidth || v.readyState < 2) return;
+    const now = performance.now();
+    if(now - s.lastTs < 50) return;                 // ~20 checks per second is plenty
+    s.lastTs = now;
+    let res; try{ res = lm.detectForVideo(v, now); }catch(e){ return; }
+    lvFrame(res, v.videoWidth, v.videoHeight, now);
+  };
+  lv.raf = requestAnimationFrame(loop);
+}
+function lvFail(msg){
+  const s=lv.st; lvStop(); stopCamOnly();
+  lv.fails++;
+  if(lv.fails >= LV.MAX_FAILS){ lv.lockUntil = Date.now()+LV.LOCK_MS; lv.fails=0;
+    msg += ` — locked for ${LV.LOCK_MS/1000}s`; }
+  lvHud('⛔', msg, 'bad'); lvProg(0);
+  camButtons('retry');
+  if(s){ s.failed=true; }
+  checkReady();
+}
+function lvFrame(res, W, H, now){
+  const s = lv.st; if(!s) return;
+  const faces = (res && res.faceLandmarks) || [];
+  if(faces.length > 1){
+    if(s.phase==='ready'){ s.readyN=0; return lvHud('👥', 'Only one person should be in the frame', ''); }
+    return lvFail('More than one face in view — only you should be in the frame');
+  }
+  if(!faces.length){
+    if(s.phase!=='ready' && now - s.lastSeen > LV.LOST_MS) return lvFail('Face lost — keep your face in the frame and try again');
+    if(s.phase==='ready'){ s.readyN=0; lvHud('🙂', 'No face found — look straight at the camera', ''); }
+    return;
+  }
+  const m = lvMetrics(faces[0], W, H), sh = lvShapes(res);
+  if(s.prev && s.phase!=='ready'){
+    const jump = Math.hypot(m.cx-s.prev.cx, m.cy-s.prev.cy);
+    if(jump > LV.MAX_JUMP || Math.abs(Math.log(m.iodRel/s.prev.iodRel)) > 0.45)
+      return lvFail('Face moved too suddenly — the check has been reset');
+  }
+  s.prev = m; s.lastSeen = now; s.frames++;
+
+  if(s.phase==='ready'){
+    if(m.iodRel < LV.MIN_IOD){ s.readyN=0; return lvHud('🔍', 'Come a little closer to the camera', ''); }
+    if(Math.abs(m.noseOff) > 0.12 || sh.open > 0.45){ s.readyN=0; return lvHud('🙂', 'Look straight at the camera with eyes open', ''); }
+    if(++s.readyN < 8) return lvHud('🙂', 'Hold still…', '');
+    s.base = { noseOff:m.noseOff, cheek:m.cheek, smile:sh.smile, iodRel:m.iodRel };
+    return lvNext(now);
+  }
+  if(s.phase==='step'){
+    const k = s.seq[s.idx];
+    lvProg(1 - (now - s.stepT0)/LV.STEP_MS);
+    if(now - s.stepT0 > LV.STEP_MS) return lvFail('Time up — the action was not detected');
+    if(m.iodRel < LV.MIN_IOD*0.75) return lvHud('🔍', 'Come closer — '+LV_TEXT[k][1], '');
+    const dn = m.noseOff - s.base.noseOff, dc = m.cheek - s.base.cheek;
+    let done=false;
+    if(k==='blink'){
+      if(s.sub===0 && sh.open < 0.30) s.sub=1;                 // eyes seen open
+      else if(s.sub===1 && sh.blink > 0.55) s.sub=2;           // both eyes closed
+      else if(s.sub===2 && sh.open < 0.30) done=true;          // open again
+    } else if(k==='turnLeft' || k==='turnRight'){
+      const dir = k==='turnLeft' ? 1 : -1;
+      /* a flat photo being tilted: the cheeks squash but the nose stays centred */
+      if(dir*dc < -LV.TURN_CHEEK*1.3 && Math.abs(dn) < LV.FLAT_NOSE){ s.flat=(s.flat||0)+1;
+        if(s.flat > 6) return lvFail('Spoof suspected — a flat photo or screen was detected'); }
+      else s.flat=0;
+      if(dir*dn > LV.TURN_NOSE && dir*dc < -LV.TURN_CHEEK) done=true;
+    } else if(k==='smile'){
+      /* a smile only counts when it follows a neutral face — a smiling photo can never relax */
+      if(s.sub===0 && sh.smile < 0.30) s.sub=1;
+      else if(s.sub===1 && sh.smile > 0.60) done=true;
+    }
+    if(done){ s.idx++; s.sub=0; s.flat=0; return lvNext(now); }
+    return;
+  }
+  if(s.phase==='final'){
+    lvProg(1 - (now - s.stepT0)/LV.STEP_MS);
+    if(now - s.stepT0 > LV.STEP_MS) return lvFail('Time up — look straight at the camera at the end');
+    if(Math.abs(m.noseOff - s.base.noseOff) < 0.10 && sh.open < 0.35 && m.iodRel >= LV.MIN_IOD*0.8){
+      if(++s.readyN >= 4) return lvPass();
+    } else s.readyN=0;
+  }
+}
+function lvNext(now){
+  const s = lv.st; s.stepT0 = now; s.readyN = 0;
+  if(s.idx >= s.seq.length){ s.phase='final'; lvDots(); return lvHud('📸', 'Now look straight at the camera', 'go'); }
+  s.phase='step'; lvDots();
+  const t = LV_TEXT[s.seq[s.idx]];
+  lvHud(t[0], `Step ${s.idx+1}/${s.seq.length}: ${t[1]}`, 'go');
+}
+function lvPass(){
+  const s = lv.st, v=$('#camVideo'), c=$('#camCanvas');
+  if(!v || !c || !v.videoWidth) return;
+  const w=Math.min(640, v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
+  c.width=w; c.height=h; c.classList.remove('unmirror');
+  c.getContext('2d').drawImage(v,0,0,w,h);
+  cam.photo = c.toDataURL('image/jpeg', 0.72); cam.photoSrc='live';
+  cam.live = { ok:true, at:Date.now(), seq:s.seq.slice(), ms:Math.round(performance.now()-s.t0), frames:s.frames };
+  lv.fails = 0;
+  lvStop(); c.style.display='block'; v.style.display='none'; stopCamOnly();
+  lvHud('✅', 'Live face verified', 'ok'); lvProg(0); $('#lvDots').innerHTML='';
+  camButtons('done');
+  clearTimeout(lv.expTimer);
+  lv.expTimer = setTimeout(()=>{
+    if(!$('#punchBtn') || lvValid()) return;
+    cam.photo=null; cam.live=null; cam.photoSrc=null;
+    const cv=$('#camCanvas'); if(cv) cv.style.display='none';
+    lvHud('⌛', 'Face check expired — please do it again', 'bad'); camButtons('retry'); checkReady();
+  }, LV.VALID_MS + 500);
+  checkReady();
+}
+function stopCamOnly(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+function camButtons(mode){
+  const show=(id,on)=>{ const e=$(id); if(e) e.style.display=on?'inline-flex':'none'; };
+  show('#camStartBtn', mode==='start');
+  show('#camRetakeBtn', mode==='retry' || mode==='done');
+  show('#camDevBtn', mode==='done' && ocCanDeviceCapture());
+  const off=$('#camOff'); if(off) off.style.display = (mode==='start' && !cam.photo) ? '' : 'none';
+  if(mode!=='done'){ const cv=$('#camCanvas'); if(cv) cv.style.display='none'; }
+  if(mode==='start' || mode==='retry'){ const v=$('#camVideo'); if(v) v.style.display='none'; }
+}
+
+/* ---- direct device-camera capture — mis@oakcraft.in only ----
+   Opens the phone's own camera app (higher quality photo). Allowed only AFTER the
+   live check has passed, only within its 2-minute window, only for a photo taken
+   just now (an old gallery picture is refused) and only with exactly one face. */
+function devCapOpen(){
+  if(!ocCanDeviceCapture()) return;
+  if(!lvValid()){ toast('Complete the live face check first','err'); return; }
+  const i=$('#camDevInput'); if(i) i.click();
+}
+async function devCapPick(inp){
+  const f = inp.files && inp.files[0]; inp.value='';
+  if(!f || !ocCanDeviceCapture()) return;
+  if(!lvValid()){ toast('Face check expired — do the live check again','err'); return; }
+  if(!/^image\//i.test(f.type||'')){ toast('That is not a photo','err'); return; }
+  if(!f.lastModified || Math.abs(Date.now()-f.lastModified) > LV.VALID_MS){
+    toast('Use a photo taken just now with the camera — saved photos are not allowed','err'); return; }
+  const url = URL.createObjectURL(f);
+  try{
+    const img = await new Promise((ok,no)=>{ const im=new Image(); im.onload=()=>ok(im); im.onerror=()=>no(new Error('Could not read the photo')); im.src=url; });
+    const sc = Math.min(1, 800/Math.max(img.width,img.height));
+    const w = Math.round(img.width*sc), h = Math.round(img.height*sc);
+    const tmp = document.createElement('canvas'); tmp.width=w; tmp.height=h; tmp.getContext('2d').drawImage(img,0,0,w,h);
+    const lm = await lvLoad();
+    let res;
+    try{ await lm.setOptions({runningMode:'IMAGE'}); res = lm.detect(tmp); }
+    finally{ try{ await lm.setOptions({runningMode:'VIDEO'}); }catch(e){} }
+    const faces = (res && res.faceLandmarks) || [];
+    if(faces.length !== 1){ toast(faces.length ? 'Only one face may be in the photo' : 'No face found in the photo — try again','err'); return; }
+    if(lvMetrics(faces[0], w, h).iodRel < 0.08){ toast('Face is too small — hold the phone closer','err'); return; }
+    const c=$('#camCanvas'); if(!c) return;
+    c.width=w; c.height=h; c.getContext('2d').drawImage(tmp,0,0); c.classList.add('unmirror'); c.style.display='block';
+    cam.photo = tmp.toDataURL('image/jpeg', 0.78); cam.photoSrc='device';
+    lvHud('✅', 'Live face verified · photo from device camera', 'ok');
+    checkReady();
+  }catch(e){ toast(e.message||'Could not use that photo','err'); }
+  finally{ URL.revokeObjectURL(url); }
+}
+
 async function renderPunch(){
   const t=S.today||{};
   /* The canvas is rebuilt empty every time this screen is drawn, so a selfie left
      over from a previous visit would enable the punch button with nothing on
      screen to show for it. */
-  cam.photo=null; stopCam();
+  cam.photo=null; cam.live=null; cam.photoSrc=null; cam.inside=undefined; cam.geo=null; stopCam(); clearTimeout(lv.expTimer);
   const nextType = !t.punchedIn ? 'Punch In' : 'Punch Out';
   const staff = needPhoto();
+  const devCap = staff && ocCanDeviceCapture();
   const camCard = staff ? `
     <div class="card cam-card">
       <div class="cam-stage">
-        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the camera</div>
+        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the live face check<br><small>You will be asked to blink, turn your head and so on — photos and screens are rejected</small></div>
         <video id="camVideo" autoplay playsinline muted style="display:none"></video>
         <canvas id="camCanvas"></canvas>
+        <div class="lv-oval" id="lvOval"></div>
+        <div class="lv-hud" id="lvHud" style="display:none"><span class="lv-ic" id="lvIcon"></span><span id="lvText"></span>
+          <div class="lv-dots" id="lvDots"></div><div class="lv-bar"><i id="lvProg"></i></div></div>
       </div>
       <div class="cam-bar">
-        <button class="btn btn-gold" id="camStartBtn" onclick="startCam()">📷 Camera On</button>
-        <button class="btn btn-p" id="camSnapBtn" onclick="snap()" style="display:none">📸 Take Selfie</button>
+        <button class="btn btn-gold" id="camStartBtn" onclick="lvStart()">📷 Start face check</button>
         <button class="btn btn-o" id="camRetakeBtn" onclick="retake()" style="display:none">↺ Retake</button>
+        ${devCap?`<button class="btn btn-p" id="camDevBtn" onclick="devCapOpen()" style="display:none">📱 Take photo with device camera</button>
+        <input type="file" id="camDevInput" accept="image/*" capture="user" hidden onchange="devCapPick(this)">`:''}
       </div>
     </div>` : '';
   $('#main').innerHTML = `
-  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Punch with a selfie + live location (Staff rule)':'One button — live location captured automatically (Labour rule)'}</div></div></div>
+  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Punch with a live-verified selfie + location within 100 m of office (Staff rule)':'One button — live location within 100 m of office (Labour rule)'}</div></div></div>
   <div class="punch-wrap" ${staff?'':'style="grid-template-columns:1fr;max-width:520px"'}>
     ${camCard}
     <div>
@@ -1354,7 +1663,7 @@ async function renderPunch(){
         <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
         <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
           ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
-        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Take a selfie and wait for GPS lock':'Waiting for GPS lock…'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Pass the live face check and wait for GPS lock':'Waiting for GPS lock…'}</div>
       </div>
       <div class="card" style="margin-top:16px"><h3>Today's punches</h3>
         <div class="timeline" id="todayPunches">${renderPunchList(t.punches||[])}</div></div>
@@ -1362,6 +1671,7 @@ async function renderPunch(){
   </div>`;
   tickClock(); if(window._clk) clearInterval(window._clk); window._clk=setInterval(tickClock,1000);
   getGPS();
+  if(staff) lvLoad().catch(()=>{});     // warm the face model up while GPS locks
 }
 function renderPunchList(punches){
   if(!punches.length) return '<div class="empty" style="padding:20px">No punches today yet</div>';
@@ -1375,45 +1685,40 @@ function tickClock(){ const n=new Date(); const el=$('#liveClock'); if(!el){clea
 async function startCam(){
   try{
     cam.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720}},audio:false});
-    $('#camVideo').srcObject=cam.stream; $('#camVideo').style.display='block';
-    $('#camOff').style.display='none'; $('#camStartBtn').style.display='none'; $('#camSnapBtn').style.display='inline-flex';
+    const v=$('#camVideo'); if(!v){ stopCamOnly(); return false; }
+    v.srcObject=cam.stream; v.style.display='block';
+    const c=$('#camCanvas'); if(c) c.style.display='none';
+    $('#camOff').style.display='none';
     return true;
   }catch(e){
     toast('Camera access denied — please allow browser permission','err');
-    /* put the screen back the way it was, so the person is not left staring at a
-       Take Selfie button with no camera behind it */
-    const off=$('#camOff'), start=$('#camStartBtn'), snapB=$('#camSnapBtn');
-    if(off) off.style.display='';
-    if(start) start.style.display='inline-flex';
-    if(snapB) snapB.style.display='none';
+    /* put the screen back the way it was, so the person is not left with no camera */
+    camButtons('start');
     return false;
   }
 }
-function snap(){
-  const v=$('#camVideo'), c=$('#camCanvas');
-  if(!v || !v.videoWidth){ toast('Camera is still starting — try again in a second','err'); return; }
-  const w=Math.min(640, v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
-  c.width=w; c.height=h;
-  c.getContext('2d').drawImage(v,0,0,w,h);
-  cam.photo = c.toDataURL('image/jpeg', 0.72);
-  c.style.display='block'; v.style.display='none'; stopCam();
-  $('#camSnapBtn').style.display='none'; $('#camRetakeBtn').style.display='inline-flex';
-  checkReady();
-}
+/* The old manual "Take Selfie" path is gone on purpose: a selfie is only ever
+   taken by the live check itself, so it cannot be skipped. */
+function snap(){ lvStart(); }
 async function retake(){
-  cam.photo=null;
-  $('#camCanvas').style.display='none';
-  $('#camRetakeBtn').style.display='none';
+  cam.photo=null; cam.live=null; cam.photoSrc=null;
+  const c=$('#camCanvas'); if(c) c.style.display='none';
   checkReady();
-  await startCam();   /* startCam puts the right buttons back either way */
+  await lvStart();
 }
 /* ================= LOCATION — robust multi-stage GPS =================
    PURANI PROBLEM: sirf ek getCurrentPosition({enableHighAccuracy:true, timeout:15000}).
    Andar baithe employee ko 15 sec me satellite fix nahi milta -> TIMEOUT -> permanent
    "Location unavailable" error, aur dobara koshish bhi nahi hoti thi.
-   AB: Stage 1 = fast network fix (button turant unblock), Stage 2 = watchPosition se
-   high-accuracy refine, error code ke hisaab se sahi message, aur Retry link. */
-const GPS_GOOD_ACC  = 60;      // metres — itni accuracy mil gayi to refine band
+   AB: Stage 1 = fast network fix, Stage 2 = watchPosition se high-accuracy refine,
+   error code ke hisaab se sahi message, aur Retry link.
+   STRICT GEO-FENCE: office se 100 m ke andar hi punch — koi GPS-error ki chhoot nahi.
+   GPS accuracy ±50 m ya behtar honi chahiye, warna confirm hi nahi ho sakta ki aap
+   andar ho. Punch dabane ke waqt location DOBARA li jaati hai aur phir se check hoti hai. */
+const GEO_MAX_RADIUS = 100;    // metres — hard ceiling, Settings me zyada likha ho tab bhi
+const GEO_MAX_ACC    = 50;     // metres — isse kharaab accuracy par punch nahi
+const GEO_FIX_MAX_AGE= 30000;  // ms — punch ke liye location itni purani se zyada nahi
+const GPS_GOOD_ACC  = 20;      // metres — itni accuracy mil gayi to refine band
 const GPS_REFINE_MS = 90000;   // itni der tak accuracy improve karte rahenge
 let gpsWatchId=null, gpsHardTimer=null, gpsLastFix=null;
 
@@ -1433,25 +1738,39 @@ function gpsErrText(err){
     default: return 'GPS signal nahi mil raha (chhat ke neeche ho) — khidki ya darwaze ke paas jaakar'+GPS_RETRY;
   }
 }
+/* Strict office check. No benefit of the doubt: the measured point must be within
+   the radius (max 100 m) AND the fix must be accurate to ±50 m. */
+function geoEval(pos){
+  const g=S.geofence;
+  if(!(g && g.lat && g.lng)) return { ok:true, none:true };
+  const set = Number(g.radius)||0;
+  const radius = set>0 ? Math.min(set, GEO_MAX_RADIUS) : GEO_MAX_RADIUS;
+  const dist = haversineM(pos.lat, pos.lng, Number(g.lat), Number(g.lng));
+  if(!(pos.accuracy <= GEO_MAX_ACC)) return { ok:false, dist, radius, reason:'acc' };
+  return { ok: dist <= radius, dist, radius, reason: dist <= radius ? '' : 'far' };
+}
+function geoShow(ge, acc){
+  const row=$('#geoRow'); if(!row) return;
+  if(ge.none){ row.style.display='none'; return; }
+  row.style.display='flex';
+  const d=Math.round(ge.dist), far = d>=1000 ? (ge.dist/1000).toFixed(1)+' km' : d+'m';
+  $('#geoDot').className='gps-dot '+(ge.ok?'ok':ge.reason==='acc'?'warn':'err');
+  $('#geoText').innerHTML = ge.ok
+    ? `🏢 You are <b>inside</b> the office zone (${d}m / ${ge.radius}m allowed) ✅`
+    : ge.reason==='acc'
+      ? `📡 GPS accuracy is ±${acc}m — need ±${GEO_MAX_ACC}m or better to confirm you are within ${ge.radius}m. Turn on <b>Precise location</b>, step near a window, then`+GPS_RETRY
+      : `⛔ You are <b>${far}</b> from office — punch is allowed only within ${ge.radius}m`;
+}
 function gpsApply(p, refining){
   gpsLastFix = p;
   const acc = Math.round(p.coords.accuracy||0);
-  cam.pos = {lat:p.coords.latitude, lng:p.coords.longitude, accuracy:acc};
-  const weak = acc > GPS_GOOD_ACC;
+  cam.pos = {lat:p.coords.latitude, lng:p.coords.longitude, accuracy:acc, ts:p.timestamp||Date.now()};
+  const weak = acc > GEO_MAX_ACC;
   gpsShow(`Location locked <b>±${acc}m</b>${(refining&&weak)?' <span style="color:var(--muted)">· accuracy improve ho rahi hai…</span>':''} · <a href="https://maps.google.com/?q=${cam.pos.lat},${cam.pos.lng}" target="_blank" style="color:var(--blue)">map</a>`, weak?'warn':'ok');
   // office geo-fence indicator (live distance)
-  const g=S.geofence;
-  if(g && g.radius>0 && g.lat && g.lng){
-    const dist  = Math.round(haversineM(cam.pos.lat,cam.pos.lng,Number(g.lat),Number(g.lng)));
-    const slack = Math.min(acc, 250);            // GPS error ka benefit-of-doubt (max 250m)
-    const inside= (dist - slack) <= Number(g.radius);
-    cam.inside=inside;
-    const row=$('#geoRow'); if(row){ row.style.display='flex';
-      $('#geoDot').className='gps-dot '+(inside?'ok':'err');
-      $('#geoText').innerHTML= inside
-        ? `🏢 You are <b>inside</b> the office zone (${dist}m / ${g.radius}m allowed) ✅`
-        : `⛔ You are <b>${dist>=1000?(dist/1000).toFixed(1)+' km':dist+'m'}</b> away from office — you can only punch within ${g.radius}m`; }
-  } else cam.inside=true;
+  const ge = geoEval(cam.pos);
+  cam.geo = ge; cam.inside = ge.ok;
+  geoShow(ge, acc);
   checkReady();
 }
 function gpsRefine(){
@@ -1482,30 +1801,74 @@ function getGPS(){
     {enableHighAccuracy:false, timeout:12000, maximumAge:60000}
   );
 }
+/* A brand-new high-accuracy fix taken at the moment of punching. Falls back to the
+   last fix only if it is less than 30 s old. */
+function gpsFreshFix(){
+  return new Promise((ok, no)=>{
+    const fallback = e => {
+      if(gpsLastFix && (Date.now() - (gpsLastFix.timestamp||0)) <= GEO_FIX_MAX_AGE) ok(gpsLastFix);
+      else no(e && e.code===1 ? new Error('Location permission is blocked — allow it and try again')
+                              : new Error('Could not confirm your location right now — step near a window and try again'));
+    };
+    try{
+      navigator.geolocation.getCurrentPosition(
+        p => (Date.now() - (p.timestamp||Date.now())) <= GEO_FIX_MAX_AGE ? ok(p) : fallback(),
+        fallback,
+        {enableHighAccuracy:true, timeout:15000, maximumAge:0});
+    }catch(e){ fallback(e); }
+  });
+}
 function checkReady(){
-  const photoOk = !needPhoto() || !!cam.photo;
-  const zoneOk = cam.inside !== false;
+  const staff = needPhoto();
+  const photoOk = !staff || (!!cam.photo && lvValid());
+  const zoneOk = cam.inside === true;
   const ok = photoOk && cam.pos && zoneOk;
   const b=$('#punchBtn'); if(!b) return;
   b.disabled=!ok;
   $('#punchHint').textContent = ok ? 'All set — tap to punch ✅'
     : !cam.pos ? 'Waiting for GPS lock…'
-    : !zoneOk ? 'Reach the office location to punch'
-    : 'Selfie still required';
+    : (cam.geo && cam.geo.reason==='acc') ? `Waiting for GPS accuracy of ±${GEO_MAX_ACC}m or better`
+    : !zoneOk ? `Reach within ${(cam.geo&&cam.geo.radius)||GEO_MAX_RADIUS}m of the office to punch`
+    : 'Live face check still required';
 }
 async function doPunch(){
-  const b=$('#punchBtn'); b.disabled=true; b.innerHTML='<span class="spin"></span> Saving…';
+  const b=$('#punchBtn'); const label=b.innerHTML; b.disabled=true;
+  const restore = () => { b.innerHTML=label; checkReady(); };
+  /* 1 — the live face check must still be valid (2-minute window) */
+  if(needPhoto() && !(cam.photo && lvValid())){
+    toast('Live face check expired — please do it again','err');
+    cam.photo=null; cam.live=null; restore(); return;
+  }
+  /* 2 — location is taken again NOW and checked again, strictly */
+  b.innerHTML='<span class="spin"></span> Verifying location…';
+  let fix;
+  try{ fix = await gpsFreshFix(); }catch(e){ toast(e.message,'err'); restore(); return; }
+  if(!$('#punchBtn')) return;
+  gpsApply(fix, false);
+  const ge = cam.geo || geoEval(cam.pos);
+  if(!ge.ok){
+    toast(ge.reason==='acc' ? `GPS accuracy ±${cam.pos.accuracy}m is not good enough — need ±${GEO_MAX_ACC}m`
+                            : `⛔ You are ${Math.round(ge.dist)}m from office — punch allowed only within ${ge.radius}m`, 'err');
+    restore(); return;
+  }
+  if(needPhoto() && !lvValid()){ toast('Live face check expired — please do it again','err'); cam.photo=null; cam.live=null; restore(); return; }
+  b.innerHTML='<span class="spin"></span> Saving…';
   try{
     const r = await api('punch', {photoBase64:cam.photo, lat:cam.pos.lat, lng:cam.pos.lng, accuracy:cam.pos.accuracy,
       device:navigator.userAgent.slice(0,110),
+      /* extra proof for the backend (ignored by an old backend, see APPS_SCRIPT_PATCH.md) */
+      liveness: needPhoto() && cam.live ? { passed:true, at:new Date(cam.live.at).toISOString(), steps:cam.live.seq.join(','), ms:cam.live.ms } : null,
+      photoSource: needPhoto() ? (cam.photoSrc||'live') : 'none',
+      distanceM: ge.none ? null : Math.round(ge.dist), radiusM: ge.none ? null : ge.radius,
       /* sent on every punch. A backend that ignores them loses nothing; one that
          honours them can accept a punch that was taken offline and uploaded later,
          and can throw away a duplicate arriving with the same clientId. */
       clientTime: new Date().toISOString(), clientId: 'pn_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)});
     toast(`✅ ${r.type} saved — ${fmtT(r.time)}`, 'ok');
-    const d = await api('init', {}, {fresh:true}); S.today=d.today; cam.photo=null;
+    cam.photo=null; cam.live=null; cam.photoSrc=null;
+    const d = await api('init', {}, {fresh:true}); S.today=d.today;
     renderPunch();
-  }catch(e){ toast(e.message,'err'); b.disabled=false; b.innerHTML='Punch'; }
+  }catch(e){ toast(e.message,'err'); restore(); }
 }
 
 /* ================= CALENDAR VIEW ================= */
@@ -2548,7 +2911,7 @@ async function renderSettings(){
       <h3 style="margin-top:22px">Geo-fence (optional)</h3>
       ${F('geofence_lat','Office Latitude','blank = off','text')}
       ${F('geofence_lng','Office Longitude','blank = off','text')}
-      ${F('geofence_radius_m','Radius (meters)','0 = no restriction')}
+      ${F('geofence_radius_m','Radius (meters)','hard limit 100 m — larger values are capped at 100')}
       <div class="modal-foot" style="justify-content:flex-start"><button class="btn btn-p" onclick="saveSettings(this)">Save Settings</button></div>
     </div>
     <div class="card"><h3>Holidays</h3><div class="chart-sub">Festival = paid holiday, counts in payout</div>
