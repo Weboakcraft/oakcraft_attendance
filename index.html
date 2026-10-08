@@ -1337,7 +1337,7 @@ let cam={stream:null, photo:null, pos:null, live:null, photoSrc:null, inside:und
 function needPhoto(){ return String(S.profile.type||'Staff').toLowerCase()==='staff'; } // Staff → selfie mandatory; Labour/Worker → location only
 function haversineM(la1,lo1,la2,lo2){ const R=6371000,r=Math.PI/180,dLa=(la2-la1)*r,dLo=(lo2-lo1)*r;
   const a=Math.sin(dLa/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2; return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
-function stopCam(){ lvStop(); if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
+function stopCam(){ if(typeof lvCancelAuto==='function') lvCancelAuto(); lvStop(); if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
 
 /* Direct device-camera capture (the phone's own camera app) is offered to these
    accounts only. Everyone else never sees the button and the handler refuses. */
@@ -1376,7 +1376,7 @@ const LV = {
   MAX_FAILS: 3, LOCK_MS: 30000
 };
 const LV_TEXT = {
-  blink:     ['👁️', 'Blink your eyes slowly'],
+  blink:     ['👁️', 'Blink your eyes — photo & punch happen automatically'],
   turnLeft:  ['⬅️', 'Slowly turn your head to your LEFT'],
   turnRight: ['➡️', 'Slowly turn your head to your RIGHT'],
   smile:     ['😁', 'Relax your face, then give a big smile']
@@ -1410,7 +1410,12 @@ function lvLoad(){
 function lvValid(){ return !!(cam.live && cam.live.ok && (Date.now() - cam.live.at) <= LV.VALID_MS); }
 function lvStop(){ if(lv.raf){ cancelAnimationFrame(lv.raf); lv.raf=0; } lv.st=null; }
 function lvShuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+/* Staff flow: just one blink. A photo or a phone screen cannot blink; the moment
+   the eyes open again the selfie is captured from the live stream and the punch is
+   saved automatically. (The head-turn / smile checks below stay available.) */
+const LV_STEPS = ['blink'];
 function lvSequence(){
+  if(LV_STEPS && LV_STEPS.length) return LV_STEPS.slice();
   const turn = Math.random()<0.5 ? 'turnLeft' : 'turnRight';
   const other = turn==='turnLeft' ? 'turnRight' : 'turnLeft';
   const third = Math.random()<0.5 ? 'smile' : other;
@@ -1448,6 +1453,7 @@ function lvProg(frac){ const p=$('#lvProg'); if(p) p.style.width=Math.max(0,Math
 
 async function lvStart(){
   stopCamOnly();
+  lvCancelAuto();
   cam.live=null; cam.photo=null; cam.photoSrc=null; checkReady();
   if(Date.now() < lv.lockUntil){
     const s=Math.ceil((lv.lockUntil-Date.now())/1000);
@@ -1517,7 +1523,7 @@ function lvFrame(res, W, H, now){
   if(s.phase==='step'){
     const k = s.seq[s.idx];
     lvProg(1 - (now - s.stepT0)/LV.STEP_MS);
-    if(now - s.stepT0 > LV.STEP_MS) return lvFail('Time up — the action was not detected');
+    if(now - s.stepT0 > LV.STEP_MS) return lvFail(k==='blink' ? 'No blink detected — a photo or screen cannot punch. Tap Retake and blink' : 'Time up — the action was not detected');
     if(m.iodRel < LV.MIN_IOD*0.75) return lvHud('🔍', 'Come closer — '+LV_TEXT[k][1], '');
     const dn = m.noseOff - s.base.noseOff, dc = m.cheek - s.base.cheek;
     let done=false;
@@ -1550,10 +1556,12 @@ function lvFrame(res, W, H, now){
 }
 function lvNext(now){
   const s = lv.st; s.stepT0 = now; s.readyN = 0;
-  if(s.idx >= s.seq.length){ s.phase='final'; lvDots(); return lvHud('📸', 'Now look straight at the camera', 'go'); }
+  if(s.idx >= s.seq.length){
+    if(s.seq.length===1) return lvPass();            // blink-only: capture right now
+    s.phase='final'; lvDots(); return lvHud('📸', 'Now look straight at the camera', 'go'); }
   s.phase='step'; lvDots();
   const t = LV_TEXT[s.seq[s.idx]];
-  lvHud(t[0], `Step ${s.idx+1}/${s.seq.length}: ${t[1]}`, 'go');
+  lvHud(t[0], s.seq.length>1 ? `Step ${s.idx+1}/${s.seq.length}: ${t[1]}` : t[1], 'go');
 }
 function lvPass(){
   const s = lv.st, v=$('#camVideo'), c=$('#camCanvas');
@@ -1565,16 +1573,34 @@ function lvPass(){
   cam.live = { ok:true, at:Date.now(), seq:s.seq.slice(), ms:Math.round(performance.now()-s.t0), frames:s.frames };
   lv.fails = 0;
   lvStop(); c.style.display='block'; v.style.display='none'; stopCamOnly();
-  lvHud('✅', 'Live face verified', 'ok'); lvProg(0); $('#lvDots').innerHTML='';
+  lvHud('✅', 'Blink verified — photo captured', 'ok'); lvProg(0); $('#lvDots').innerHTML='';
   camButtons('done');
+  lvArmAutoPunch();
   clearTimeout(lv.expTimer);
   lv.expTimer = setTimeout(()=>{
     if(!$('#punchBtn') || lvValid()) return;
-    cam.photo=null; cam.live=null; cam.photoSrc=null;
+    lvCancelAuto(); cam.photo=null; cam.live=null; cam.photoSrc=null;
     const cv=$('#camCanvas'); if(cv) cv.style.display='none';
     lvHud('⌛', 'Face check expired — please do it again', 'bad'); camButtons('retry'); checkReady();
   }, LV.VALID_MS + 500);
   checkReady();
+}
+/* After the photo: save the punch by itself. Accounts allowed to use the device
+   camera get 4 seconds to switch to it before the auto-punch fires. */
+function lvCancelAuto(){ clearTimeout(cam.autoTimer); cam.autoTimer=null; cam.autoPunch=false; }
+function lvArmAutoPunch(){
+  lvCancelAuto();
+  if(!needPhoto()) return;
+  if(ocCanDeviceCapture()){
+    let n=4;
+    const tick=()=>{
+      if(!$('#punchBtn') || !lvValid()) return lvCancelAuto();
+      if(n<=0){ cam.autoTimer=null; cam.autoPunch=true; lvHud('✅','Blink verified — saving punch…','ok'); return checkReady(); }
+      lvHud('✅', `Blink verified — punch saves in ${n}s (tap device camera to use it instead)`, 'ok'); n--;
+      cam.autoTimer=setTimeout(tick,1000);
+    };
+    tick();
+  } else { cam.autoPunch=true; checkReady(); }
 }
 function stopCamOnly(){ if(cam.stream){ cam.stream.getTracks().forEach(t=>t.stop()); cam.stream=null; } }
 function camButtons(mode){
@@ -1593,12 +1619,14 @@ function camButtons(mode){
    just now (an old gallery picture is refused) and only with exactly one face. */
 function devCapOpen(){
   if(!ocCanDeviceCapture()) return;
+  lvCancelAuto();
   if(!lvValid()){ toast('Complete the live face check first','err'); return; }
   const i=$('#camDevInput'); if(i) i.click();
 }
 async function devCapPick(inp){
   const f = inp.files && inp.files[0]; inp.value='';
   if(!f || !ocCanDeviceCapture()) return;
+  lvCancelAuto();
   if(!lvValid()){ toast('Face check expired — do the live check again','err'); return; }
   if(!/^image\//i.test(f.type||'')){ toast('That is not a photo','err'); return; }
   if(!f.lastModified || Math.abs(Date.now()-f.lastModified) > LV.VALID_MS){
@@ -1619,7 +1647,8 @@ async function devCapPick(inp){
     const c=$('#camCanvas'); if(!c) return;
     c.width=w; c.height=h; c.getContext('2d').drawImage(tmp,0,0); c.classList.add('unmirror'); c.style.display='block';
     cam.photo = tmp.toDataURL('image/jpeg', 0.78); cam.photoSrc='device';
-    lvHud('✅', 'Live face verified · photo from device camera', 'ok');
+    lvHud('✅', 'Blink verified · photo from device camera — saving punch…', 'ok');
+    cam.autoPunch=true;
     checkReady();
   }catch(e){ toast(e.message||'Could not use that photo','err'); }
   finally{ URL.revokeObjectURL(url); }
@@ -1637,7 +1666,7 @@ async function renderPunch(){
   const camCard = staff ? `
     <div class="card cam-card">
       <div class="cam-stage">
-        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the live face check<br><small>You will be asked to blink, turn your head and so on — photos and screens are rejected</small></div>
+        <div class="cam-off" id="camOff"><span class="ic">📷</span>Tap the button, look at the camera and <b>blink</b><br><small>Your photo is taken and the punch is saved automatically — photos and screens are rejected</small></div>
         <video id="camVideo" autoplay playsinline muted style="display:none"></video>
         <canvas id="camCanvas"></canvas>
         <div class="lv-oval" id="lvOval"></div>
@@ -1645,14 +1674,14 @@ async function renderPunch(){
           <div class="lv-dots" id="lvDots"></div><div class="lv-bar"><i id="lvProg"></i></div></div>
       </div>
       <div class="cam-bar">
-        <button class="btn btn-gold" id="camStartBtn" onclick="lvStart()">📷 Start face check</button>
+        <button class="btn btn-gold" id="camStartBtn" onclick="lvStart()">👁️ ${nextType} — blink to punch</button>
         <button class="btn btn-o" id="camRetakeBtn" onclick="retake()" style="display:none">↺ Retake</button>
         ${devCap?`<button class="btn btn-p" id="camDevBtn" onclick="devCapOpen()" style="display:none">📱 Take photo with device camera</button>
         <input type="file" id="camDevInput" accept="image/*" capture="user" hidden onchange="devCapPick(this)">`:''}
       </div>
     </div>` : '';
   $('#main').innerHTML = `
-  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Punch with a live-verified selfie + location within 100 m of office (Staff rule)':'One button — live location within 100 m of office (Labour rule)'}</div></div></div>
+  <div class="topbar"><div><h2>Attendance</h2><div class="sub">${staff?'Tap, blink — selfie + punch save automatically · within 100 m of office (Staff rule)':'One button — live location within 100 m of office (Labour rule)'}</div></div></div>
   <div class="punch-wrap" ${staff?'':'style="grid-template-columns:1fr;max-width:520px"'}>
     ${camCard}
     <div>
@@ -1663,7 +1692,7 @@ async function renderPunch(){
         <div class="gps-row" id="geoRow" style="display:none"><span class="gps-dot" id="geoDot"></span><span id="geoText"></span></div>
         <button class="punch-big btn ${nextType==='Punch In'?'btn-good':'btn-danger'}" id="punchBtn" onclick="doPunch()" disabled>
           ${nextType==='Punch In'?'🟢':'🔴'} ${nextType}</button>
-        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Pass the live face check and wait for GPS lock':'Waiting for GPS lock…'}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px" id="punchHint">${staff?'Tap the camera button and blink — punch saves by itself':'Waiting for GPS lock…'}</div>
       </div>
       <div class="card" style="margin-top:16px"><h3>Today's punches</h3>
         <div class="timeline" id="todayPunches">${renderPunchList(t.punches||[])}</div></div>
@@ -1701,6 +1730,7 @@ async function startCam(){
    taken by the live check itself, so it cannot be skipped. */
 function snap(){ lvStart(); }
 async function retake(){
+  lvCancelAuto();
   cam.photo=null; cam.live=null; cam.photoSrc=null;
   const c=$('#camCanvas'); if(c) c.style.display='none';
   checkReady();
@@ -1825,15 +1855,20 @@ function checkReady(){
   const ok = photoOk && cam.pos && zoneOk;
   const b=$('#punchBtn'); if(!b) return;
   b.disabled=!ok;
+  if(ok && cam.autoPunch && !cam.punching){ cam.autoPunch=false; $('#punchHint').textContent='Saving punch automatically…'; setTimeout(doPunch, 250); return; }
+  if(!ok && cam.autoPunch && cam.photo && lvValid()){ $('#punchHint').textContent = !cam.pos ? 'Photo ready — punch will save as soon as GPS locks'
+      : (cam.geo && cam.geo.reason==='acc') ? `Photo ready — waiting for GPS accuracy of ±${GEO_MAX_ACC}m` : `Reach within ${(cam.geo&&cam.geo.radius)||GEO_MAX_RADIUS}m of the office to punch`; return; }
   $('#punchHint').textContent = ok ? 'All set — tap to punch ✅'
     : !cam.pos ? 'Waiting for GPS lock…'
     : (cam.geo && cam.geo.reason==='acc') ? `Waiting for GPS accuracy of ±${GEO_MAX_ACC}m or better`
     : !zoneOk ? `Reach within ${(cam.geo&&cam.geo.radius)||GEO_MAX_RADIUS}m of the office to punch`
-    : 'Live face check still required';
+    : 'Blink check still required';
 }
 async function doPunch(){
-  const b=$('#punchBtn'); const label=b.innerHTML; b.disabled=true;
-  const restore = () => { b.innerHTML=label; checkReady(); };
+  const b=$('#punchBtn'); if(!b || cam.punching) return;
+  cam.punching=true; cam.autoPunch=false;
+  const label=b.innerHTML; b.disabled=true;
+  const restore = () => { cam.punching=false; b.innerHTML=label; checkReady(); };
   /* 1 — the live face check must still be valid (2-minute window) */
   if(needPhoto() && !(cam.photo && lvValid())){
     toast('Live face check expired — please do it again','err');
@@ -1864,6 +1899,7 @@ async function doPunch(){
          honours them can accept a punch that was taken offline and uploaded later,
          and can throw away a duplicate arriving with the same clientId. */
       clientTime: new Date().toISOString(), clientId: 'pn_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)});
+    cam.punching=false;
     toast(`✅ ${r.type} saved — ${fmtT(r.time)}`, 'ok');
     cam.photo=null; cam.live=null; cam.photoSrc=null;
     const d = await api('init', {}, {fresh:true}); S.today=d.today;
