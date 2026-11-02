@@ -2116,7 +2116,7 @@ const FC = {
 /* Safety switch, editable on GitHub without touching code: face-check.json
    {"mode":"strict"} = block photos/screens (default) · "log" = only the phone/screen
    object check blocks, the texture score is just recorded · "off" = no face check. */
-let FC_MODE = 'strict';
+let FC_MODE = 'off';   /* switched off 2 Nov 2026: the live face reader does not run on every phone. Set face-check.json to "strict" to turn it back on. */
 try{ fetch('face-check.json?t='+Date.now(), {cache:'no-store'}).then(r=>r.ok?r.json():null)
   .then(j=>{ if(j && /^(strict|log|off)$/.test(j.mode)) FC_MODE=j.mode; }).catch(()=>{}); }catch(e){}
 let fc = { loading:null, lm:null, od:null, tf:null, nets:[], timer:0, hist:[], dev:0, status:'idle', n:0, busy:false };
@@ -2267,6 +2267,12 @@ async function startCam(){
     $('#camSnapBtn').style.display='inline-flex';
     $('#camRetakeBtn').style.display='none';
     const d=$('#camDevBtn'); if(d) d.style.display='none';
+    /* Face check off: no models to download, Take Selfie works straight away. */
+    if(FC_MODE==='off'){
+      const sb=$('#camSnapBtn'); if(sb){ sb.disabled=false; sb.classList.remove('is-off'); }
+      lvHud('🙂','Camera ready — look at the camera and tap Take Selfie','ok');
+      return true;
+    }
     fcShow('loading');
     try{ await fcLoad(); }catch(e){ lvHud('⚠️', e.message, 'bad'); return true; }
     if(cam.stream && !fc.timer){ fc.hist=[]; fc.dev=0; fcRun(); }
@@ -2303,7 +2309,7 @@ function snap(){
   cam.photo = c.toDataURL('image/jpeg', 0.72); cam.photoSrc='live';
   cam.live = { ok:true, at:Date.now(), seq:['passive-'+FC_MODE], ms:0, score:+fcMedianReal().toFixed(3) };
   fcStop(); c.style.display='block'; v.style.display='none'; stopCamOnly();
-  lvHud('✅','Real face verified — selfie taken','ok');
+  lvHud('✅', FC_MODE==='off' ? 'Selfie taken' : 'Real face verified — selfie taken','ok');
   $('#camSnapBtn').style.display='none'; $('#camRetakeBtn').style.display='inline-flex';
   const d=$('#camDevBtn'); if(d) d.style.display = ocCanDeviceCapture() ? 'inline-flex' : 'none';
   checkReady();
@@ -2389,7 +2395,7 @@ async function renderPunch(){
   const camCard = staff ? `
     <div class="card cam-card">
       <div class="cam-stage">
-        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the camera<br><small>Only a real face can punch — photos and phone screens are rejected</small></div>
+        <div class="cam-off" id="camOff"><span class="ic">📷</span>Press the button below to start the camera<br>${FC_MODE==='off'?'':'<small>Only a real face can punch — photos and phone screens are rejected</small>'}</div>
         <video id="camVideo" autoplay playsinline muted style="display:none"></video>
         <canvas id="camCanvas"></canvas>
         <div class="lv-oval" id="lvOval"></div>
@@ -2423,7 +2429,7 @@ async function renderPunch(){
   </div>`;
   tickClock(); if(window._clk) clearInterval(window._clk); window._clk=setInterval(tickClock,1000);
   getGPS();
-  if(staff) fcLoad().catch(()=>{});     // warm the face check up while GPS locks
+  if(staff && FC_MODE!=='off') fcLoad().catch(()=>{});     // warm the face check up while GPS locks
 }
 function renderPunchList(punches){
   if(!punches.length) return '<div class="empty" style="padding:20px">No punches today yet</div>';
