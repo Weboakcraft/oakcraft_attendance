@@ -229,6 +229,15 @@ td .who .em{font-size:11.5px;color:var(--muted)}
 .cam-off small{display:block;margin-top:8px;font-size:11.5px;opacity:.8}
 .lv-oval{position:absolute;left:50%;top:46%;width:46%;aspect-ratio:3/4;transform:translate(-50%,-50%);border:2.5px dashed rgba(255,236,210,.4);border-radius:50%;pointer-events:none;display:none}
 #camVideo[style*="block"]~.lv-oval{display:block}
+/* Circular camera view. Only the on-screen frame is round - the selfie that is
+   saved and uploaded is still the full photo, exactly as before. */
+.cam-stage{aspect-ratio:1/1.05}
+#camVideo,#camCanvas{inset:auto;left:50%;top:57%;width:min(78%,360px);height:auto;aspect-ratio:1;border-radius:50%;object-fit:cover;
+  transform:translate(-50%,-50%) scaleX(-1);box-shadow:0 0 0 4px rgba(227,164,58,.7),0 0 0 12px rgba(227,164,58,.12),0 20px 50px -10px rgba(0,0,0,.7)}
+#camCanvas.unmirror{transform:translate(-50%,-50%);object-fit:cover}
+.lv-oval{display:none!important}
+.ti img{border-radius:50%}
+.cam-bar .btn-p{background:linear-gradient(135deg,#efb64e,#d48a24);color:#21180c}
 .lv-hud{position:absolute;left:10px;right:10px;top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:rgba(14,11,9,.82);color:#fff;border:1px solid rgba(255,236,210,.14);border-radius:14px;padding:11px 13px;font-size:14px;font-weight:650;backdrop-filter:blur(6px);line-height:1.35}
 .lv-hud .lv-ic{font-size:19px;flex:none}
 #camSnapBtn.is-off{opacity:.45;cursor:not-allowed}
